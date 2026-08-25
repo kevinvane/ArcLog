@@ -100,12 +100,35 @@ const mapOption = computed(() => {
   const server = serverCoord(serverLoc.value)
   const provinces = result.value.provinces
 
-  const linesData = provinces.map((p) => ({
-    coords: [p.coord, server],
-    value: p.count,
-    name: p.name
-  }))
+  // 按数量排名分成 5 级(quantile 分级), 保证任何分布下视觉层级都清晰
+  const K = 5
+  const n = provinces.length
+  const LEVEL_WIDTH = [9, 6.5, 4.5, 3, 1.6]
+  const LEVEL_BLUR = [16, 12, 9, 6, 3]
+  const LEVEL_STRANDS = [5, 3, 2, 1, 1] // 每级飞线股数: 流量越大线条越多
+  // 白 -> 红 梯度: t=1 最红(量大), t=0 近白(量小)
+  const mixWhiteRed = (t: number) =>
+    `rgb(230, ${Math.round(255 - t * 225)}, ${Math.round(255 - t * 205)})`
+  const LEVEL_COLOR = Array.from({ length: K }, (_, i) => mixWhiteRed(1 - i / (K - 1)))
+  const LEVEL_SHADOW = Array.from({ length: K }, (_, i) =>
+    `rgba(230, ${Math.round(60 + (i / (K - 1)) * 195)}, ${Math.round(50 + (i / (K - 1)) * 205)}, 0.6)`
+  )
 
+  const linesData = provinces.flatMap((p, i) => {
+    const level = Math.min(K - 1, Math.floor((i / n) * K))
+    const strands = LEVEL_STRANDS[level]
+    return Array.from({ length: strands }, (_, s) => ({
+      coords: [
+        // 起点轻微抖动, 让多股线在视觉上分开
+        [p.coord[0] + (Math.random() - 0.5) * 1.4, p.coord[1] + (Math.random() - 0.5) * 1.4],
+        server
+      ],
+      value: p.count,
+      name: p.name,
+      level,
+      lineStyle: { curveness: 0.22 + (s % 5) * 0.05 } // 不同弧度形成扇形束
+    }))
+  })
   const pointsData = provinces.map((p) => ({
     name: p.name,
     value: [...p.coord, p.count]
@@ -152,29 +175,19 @@ const mapOption = computed(() => {
         zlevel: 2,
         effect: {
           show: true,
-          period: 5,
-          trailLength: 0.25,
+          period: 4.5,
+          trailLength: 0.5,
           symbol: 'arrow',
-          symbolSize: 5
+          symbolSize: 6,
+          loop: true
         },
         lineStyle: {
-          color: (params: any) => {
-            const v = (params.data && params.data.value) || 0
-            const max = maxCount.value
-            // 对数归一化: 拉开长尾分布下各省的亮度差
-            const norm = max > 0 ? Math.log(1 + v) / Math.log(1 + max) : 0
-            const hue = 45 // 单一金色色相
-            const light = 90 - norm * 60 // 少(浅)90% -> 多(深)30%
-            return `hsl(${hue}, 95%, ${light}%)`
-          },
-          width: (params: any) => {
-            const v = (params.data && params.data.value) || 0
-            const max = maxCount.value
-            const norm = max > 0 ? Math.log(1 + v) / Math.log(1 + max) : 0
-            return 0.6 + norm * 3.4 // 少(细)0.6 -> 多(粗)4
-          },
-          opacity: 0.75,
-          curveness: 0.3
+          color: (params: any) => LEVEL_COLOR[params.data?.level ?? 0],
+          width: (params: any) => LEVEL_WIDTH[params.data?.level ?? 0],
+          opacity: 0.85,
+          curveness: 0.3,
+          shadowBlur: (params: any) => LEVEL_BLUR[params.data?.level ?? 0],
+          shadowColor: (params: any) => LEVEL_SHADOW[params.data?.level ?? 0]
         },
         data: linesData
       },
