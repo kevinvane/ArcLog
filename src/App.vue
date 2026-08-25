@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, nextTick } from 'vue'
 import VChart from 'vue-echarts'
 import { Ip2Region, type IpSearcher } from './utils/ip2region'
 import { analyze, serverCoord, type AnalyzeResult } from './utils/analyze'
@@ -101,6 +101,47 @@ function statusClass(code: string): string {
   if (code.startsWith('3')) return 's3'
   if (code.startsWith('4')) return 's4'
   return 's5'
+}
+
+// ---------- 地图 <-> 榜单 联动高亮 ----------
+const chartComp = ref<any>()
+const hoveredProvince = ref<string | null>(null)
+let currentHighlighted: string | null = null
+
+function onMapOver(params: any) {
+  const name =
+    params.componentType === 'geo'
+      ? params.name
+      : params.seriesName === '来源'
+        ? (params.data && params.data.name)
+        : null
+  if (!name || !name.trim()) return
+  hoveredProvince.value = name
+  nextTick(() => {
+    document.getElementById('prov-' + name)?.scrollIntoView({ block: 'nearest' })
+  })
+}
+
+function onMapOut() {
+  hoveredProvince.value = null
+}
+
+function highlightOnMap(name: string | null) {
+  hoveredProvince.value = name
+  // vue-echarts v8 通过 expose({ chart }) 暴露实例, 模板 ref 上没有 $el
+  const inst = chartComp.value?.chart ?? null
+  if (!inst) return
+  try {
+    if (currentHighlighted && currentHighlighted !== name) {
+      inst.dispatchAction({ type: 'downplay', geoIndex: 0, name: currentHighlighted })
+    }
+    if (name && name !== currentHighlighted) {
+      inst.dispatchAction({ type: 'highlight', geoIndex: 0, name })
+    }
+  } catch {
+    /* 忽略不支持的高亮动作 */
+  }
+  currentHighlighted = name
 }
 
 const mapOption = computed(() => {
@@ -298,7 +339,14 @@ const mapOption = computed(() => {
 
         <h3>省份 Top 12</h3>
         <ul class="list">
-          <li v-for="(p, i) in result.provinces.slice(0, 12)" :key="p.name">
+          <li
+            v-for="(p, i) in result.provinces.slice(0, 12)"
+            :key="p.name"
+            :id="'prov-' + p.name"
+            :class="{ active: hoveredProvince === p.name }"
+            @mouseenter="highlightOnMap(p.name)"
+            @mouseleave="highlightOnMap(null)"
+          >
             <span class="rank" :class="'r' + (i < 3 ? i + 1 : 0)">{{ i + 1 }}</span>
             <span class="name">{{ p.name }}</span>
             <i class="bar"><i :style="{ width: (p.count / maxCount) * 100 + '%' }"></i></i>
@@ -317,7 +365,16 @@ const mapOption = computed(() => {
     </aside>
 
     <main class="map">
-      <VChart v-if="result" :option="mapOption" autoresize class="chart" />
+      <div v-if="result" class="chart">
+        <VChart
+          ref="chartComp"
+          :option="mapOption"
+          autoresize
+          class="chart-inner"
+          @mouseover="onMapOver"
+          @mouseout="onMapOut"
+        />
+      </div>
       <div v-else class="placeholder">
         <svg viewBox="0 0 24 24" width="44" height="44" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round">
           <circle cx="12" cy="12" r="9" />
@@ -535,8 +592,21 @@ h3 {
   grid-template-columns: 22px 44px 1fr 58px;
   align-items: center;
   gap: 8px;
-  padding: 5px 0;
+  padding: 5px 4px;
+  margin: 0 -4px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  border-radius: 6px;
+  transition: background 0.15s;
+}
+.list li:hover,
+.list li.active {
+  background: rgba(255, 77, 94, 0.12);
+}
+.list li.active .name {
+  color: #fff;
+}
+.list li.active .bar > i {
+  filter: brightness(1.2);
 }
 .codes li {
   grid-template-columns: 48px 1fr;
@@ -597,6 +667,10 @@ h3 {
   min-width: 0;
 }
 .chart {
+  position: absolute;
+  inset: 0;
+}
+.chart-inner {
   width: 100%;
   height: 100%;
 }
