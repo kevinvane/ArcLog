@@ -104,6 +104,10 @@ const maxIspCount = computed(() =>
   result.value ? Math.max(1, ...result.value.isps.map((x) => x.count)) : 1
 )
 
+const alertProvinceSet = computed(
+  () => new Set(result.value ? result.value.alertedProvinces : [])
+)
+
 // ---------- 飞线密度控制 ----------
 type DensityKey = 'sparse' | 'normal' | 'dense'
 const DENSITY_STRANDS: Record<DensityKey, number[]> = {
@@ -202,7 +206,8 @@ const mapOption = computed(() => {
   })
   const pointsData = origins.map((p) => ({
     name: `${p.name} (${p.province})`,
-    value: [...p.coord, p.count]
+    value: [...p.coord, p.count],
+    alert: alertProvinceSet.value.has(p.province)
   }))
 
   return {
@@ -277,7 +282,9 @@ const mapOption = computed(() => {
         zlevel: 3,
         rippleEffect: { brushType: 'stroke' },
         symbolSize: (val: number[]) => Math.max(5, Math.sqrt(val[2] / maxCount.value) * 32),
-        itemStyle: { color: '#ff7a45' },
+        itemStyle: {
+          color: (params: any) => (params.data && params.data.alert ? '#c084fc' : '#ff7a45')
+        },
         data: pointsData
       },
       {
@@ -377,6 +384,18 @@ const mapOption = computed(() => {
           <div class="stat"><b :class="{ warn: result.unknown > 0 }">{{ result.unknown }}</b><span>无法解析</span></div>
         </div>
 
+        <template v-if="result.suspects.length">
+          <h3 class="danger-title">⚠ 可疑来源 Top 10</h3>
+          <ul class="list suspects">
+            <li v-for="s in result.suspects" :key="s.ip" :title="`主要请求: ${s.topPath}`">
+              <span class="ip">{{ s.ip }}</span>
+              <span class="meta">
+                {{ s.count }} 次 · 错误 {{ (s.errRatio * 100).toFixed(0) }}%
+              </span>
+            </li>
+          </ul>
+        </template>
+
         <h3>省份 Top 12</h3>
         <ul class="list">
           <li
@@ -388,7 +407,9 @@ const mapOption = computed(() => {
             @mouseleave="highlightOnMap(null)"
           >
             <span class="rank" :class="'r' + (i < 3 ? i + 1 : 0)">{{ i + 1 }}</span>
-            <span class="name">{{ p.name }}</span>
+            <span class="name">
+              {{ p.name }}<span v-if="alertProvinceSet.has(p.name)" class="warn-badge">⚠</span>
+            </span>
             <i class="bar"><i :style="{ width: (p.count / maxCount) * 100 + '%' }"></i></i>
             <span class="num">{{ p.count.toLocaleString() }}</span>
           </li>
@@ -728,6 +749,30 @@ h3 {
 .rank.r3 { color: #ffd9dc; background: rgba(255, 77, 94, 0.3); }
 .name {
   color: #dfe6f1;
+}
+.warn-badge {
+  margin-left: 4px;
+  color: #fbbf24;
+  font-size: 11px;
+}
+.danger-title {
+  color: #fb7185;
+}
+.suspects li {
+  grid-template-columns: 1fr auto;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+.suspects .ip {
+  font-family: ui-monospace, Consolas, monospace;
+  color: #fda4af;
+  font-size: 11px;
+}
+.suspects .meta {
+  flex-shrink: 0;
+  color: #77839b;
+  font-size: 11px;
 }
 .bar {
   position: relative;
