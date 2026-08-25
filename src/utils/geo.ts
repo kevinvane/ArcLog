@@ -1,4 +1,5 @@
 import chinaGeo from '../assets/china.json'
+import chinaCities from '../assets/china-cities.json'
 
 export type LngLat = [number, number]
 
@@ -60,6 +61,18 @@ for (const f of (chinaGeo as { features: ChinaFeature[] }).features) {
 }
 
 export const chinaGeoJson = chinaGeo
+
+// 城市坐标表（363 个地级市，名字带「市」后缀）
+const cityCoordMap = new Map<string, LngLat>()
+for (const c of chinaCities as { name: string; lng: number; lat: number }[]) {
+  cityCoordMap.set(c.name, [c.lng, c.lat])
+}
+
+// 查城市坐标: 支持 "南京市"/"南京" 两种写法
+export function cityCenter(city: string): LngLat | null {
+  if (!city) return null
+  return cityCoordMap.get(city) || cityCoordMap.get(city + '市') || null
+}
 
 export function shortProvince(full: string): string {
   return PROVINCE_ALIAS[full] || full

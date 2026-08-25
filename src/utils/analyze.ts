@@ -1,9 +1,22 @@
 import type { IpSearcher } from './ip2region'
 import { parseLog } from './parseLog'
-import { shortProvince, provinceCenter, resolveServerLocation, type LngLat } from './geo'
+import {
+  shortProvince,
+  provinceCenter,
+  cityCenter,
+  resolveServerLocation,
+  type LngLat
+} from './geo'
 
 export interface ProvinceStat {
   name: string
+  count: number
+  coord: LngLat
+}
+
+export interface CityStat {
+  name: string // 短名, 如 "南京"
+  province: string // 所属省份短名
   count: number
   coord: LngLat
 }
@@ -14,6 +27,7 @@ export interface AnalyzeResult {
   foreign: number
   unknown: number
   provinces: ProvinceStat[]
+  cities: CityStat[]
   status: { code: string; count: number }[]
   isps: { name: string; count: number }[]
   topPaths: { path: string; count: number }[]
@@ -26,6 +40,7 @@ export function analyze(
 ): AnalyzeResult {
   const lines = parseLog(text)
   const provinceCounts = new Map<string, number>()
+  const cityCounts = new Map<string, CityStat>()
   const statusCounts = new Map<string, number>()
   const pathCounts = new Map<string, number>()
   const ispCounts = new Map<string, number>()
@@ -50,12 +65,25 @@ export function analyze(
       continue
     }
     const short = shortProvince(region.province)
-    const coord = provinceCenter(short)
-    if (!coord) {
+    const provCoord = provinceCenter(short)
+    if (!provCoord) {
       foreign++
       continue
     }
     provinceCounts.set(short, (provinceCounts.get(short) || 0) + 1)
+
+    // 城市级聚合: 城市坐标缺失时回退省中心
+    const rawCity = region.city && region.city !== '0' ? region.city : ''
+    const cityShort = rawCity.replace(/市$/, '')
+    const coord = (cityShort && cityCenter(cityShort)) || provCoord
+    const key = `${short}|${cityShort || short}`
+    const prev = cityCounts.get(key)
+    if (prev) {
+      prev.count++
+    } else {
+      cityCounts.set(key, { name: cityShort || short, province: short, count: 1, coord })
+    }
+
     const isp = region.isp && region.isp !== '0' ? region.isp : '未知'
     ispCounts.set(isp, (ispCounts.get(isp) || 0) + 1)
   }
@@ -66,6 +94,8 @@ export function analyze(
     provinces.push({ name, count, coord })
   }
   provinces.sort((a, b) => b.count - a.count)
+
+  const cities = [...cityCounts.values()].sort((a, b) => b.count - a.count)
 
   const status = [...statusCounts.entries()]
     .map(([code, count]) => ({ code, count }))
@@ -86,6 +116,7 @@ export function analyze(
     foreign,
     unknown,
     provinces,
+    cities,
     status,
     isps,
     topPaths

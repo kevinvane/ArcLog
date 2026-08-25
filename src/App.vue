@@ -104,6 +104,20 @@ const maxIspCount = computed(() =>
   result.value ? Math.max(1, ...result.value.isps.map((x) => x.count)) : 1
 )
 
+// ---------- 飞线密度控制 ----------
+type DensityKey = 'sparse' | 'normal' | 'dense'
+const DENSITY_STRANDS: Record<DensityKey, number[]> = {
+  sparse: [2, 1, 1, 1, 1], // 每级股数
+  normal: [4, 2, 1, 1, 1],
+  dense: [6, 4, 3, 2, 1]
+}
+const DENSITY_OPTIONS: { label: string; value: DensityKey }[] = [
+  { label: '稀疏', value: 'sparse' },
+  { label: '适中', value: 'normal' },
+  { label: '密集', value: 'dense' }
+]
+const lineDensity = ref<DensityKey>('sparse')
+
 function statusClass(code: string): string {
   if (code.startsWith('2')) return 's2'
   if (code.startsWith('3')) return 's3'
@@ -155,14 +169,14 @@ function highlightOnMap(name: string | null) {
 const mapOption = computed(() => {
   if (!result.value) return {}
   const server = serverCoord(serverLoc.value)
-  const provinces = result.value.provinces
+  // 城市级飞线: 按城市聚合的来源点(坐标缺失时 analyze 已回退省中心)
+  const origins = result.value.cities
 
   // 按数量排名分成 5 级(quantile 分级), 保证任何分布下视觉层级都清晰
   const K = 5
-  const n = provinces.length
+  const n = origins.length
   const LEVEL_WIDTH = [9, 6.5, 4.5, 3, 1.6]
   const LEVEL_BLUR = [16, 12, 9, 6, 3]
-  const LEVEL_STRANDS = [5, 3, 2, 1, 1] // 每级飞线股数: 流量越大线条越多
   // 白 -> 红 梯度: t=1 最红(量大), t=0 近白(量小)
   const mixWhiteRed = (t: number) =>
     `rgb(230, ${Math.round(255 - t * 225)}, ${Math.round(255 - t * 205)})`
@@ -171,9 +185,9 @@ const mapOption = computed(() => {
     `rgba(230, ${Math.round(60 + (i / (K - 1)) * 195)}, ${Math.round(50 + (i / (K - 1)) * 205)}, 0.6)`
   )
 
-  const linesData = provinces.flatMap((p, i) => {
+  const linesData = origins.flatMap((p, i) => {
     const level = Math.min(K - 1, Math.floor((i / n) * K))
-    const strands = LEVEL_STRANDS[level]
+    const strands = DENSITY_STRANDS[lineDensity.value][level]
     return Array.from({ length: strands }, (_, s) => ({
       coords: [
         // 起点轻微抖动, 让多股线在视觉上分开
@@ -181,13 +195,13 @@ const mapOption = computed(() => {
         server
       ],
       value: p.count,
-      name: p.name,
+      name: `${p.name} (${p.province})`,
       level,
       lineStyle: { curveness: 0.22 + (s % 5) * 0.05 } // 不同弧度形成扇形束
     }))
   })
-  const pointsData = provinces.map((p) => ({
-    name: p.name,
+  const pointsData = origins.map((p) => ({
+    name: `${p.name} (${p.province})`,
     value: [...p.coord, p.count]
   }))
 
@@ -309,6 +323,20 @@ const mapOption = computed(() => {
           </select>
         </div>
 
+        <div class="field">
+          <label>飞线密度</label>
+          <div class="seg">
+            <button
+              v-for="d in DENSITY_OPTIONS"
+              :key="d.value"
+              :class="{ on: lineDensity === d.value }"
+              @click="lineDensity = d.value"
+            >
+              {{ d.label }}
+            </button>
+          </div>
+        </div>
+
         <div
           class="drop"
           :class="{ over: dragOver }"
@@ -343,7 +371,7 @@ const mapOption = computed(() => {
 
       <section v-if="result" class="panel stats">
         <div class="stat-grid">
-          <div class="stat"><b>{{ result.provinces.length }}</b><span>覆盖省份</span></div>
+          <div class="stat"><b>{{ result.cities.length }}</b><span>覆盖城市</span></div>
           <div class="stat"><b>{{ result.parsedLines.toLocaleString() }}</b><span>解析行数</span></div>
           <div class="stat"><b class="warn">{{ result.foreign }}</b><span>海外/未知</span></div>
           <div class="stat"><b :class="{ warn: result.unknown > 0 }">{{ result.unknown }}</b><span>无法解析</span></div>
@@ -501,6 +529,30 @@ const mapOption = computed(() => {
   color: #8b97ad;
   margin-bottom: 6px;
   letter-spacing: 0.3px;
+}
+.seg {
+  display: flex;
+  gap: 4px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  padding: 3px;
+  border-radius: 8px;
+}
+.seg button {
+  flex: 1;
+  border-radius: 6px;
+  padding: 5px 0;
+  font-size: 12px;
+  color: #93a1ba;
+  transition: background 0.15s, color 0.15s;
+}
+.seg button:hover:not(.on) {
+  background: rgba(255, 255, 255, 0.06);
+  color: #e8edf5;
+}
+.seg button.on {
+  color: #fff;
+  background: linear-gradient(135deg, #ff4d5e, #c9184a);
 }
 
 input {
