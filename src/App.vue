@@ -147,10 +147,18 @@ const mapOption = computed(() => {
     title: {
       text: 'Nginx 访问 IP 来源 · 飞线图',
       left: 'center',
-      textStyle: { color: '#e6edf3', fontSize: 16 }
+      top: 14,
+      textStyle: { color: '#c7d2e4', fontSize: 15, fontWeight: 600, letterSpacing: 1 }
     },
     tooltip: {
       trigger: 'item',
+      backgroundColor: 'rgba(13, 18, 30, 0.92)',
+      borderColor: 'rgba(255, 255, 255, 0.12)',
+      borderWidth: 1,
+      padding: [8, 12],
+      textStyle: { color: '#e8edf5', fontSize: 12 },
+      extraCssText:
+        'border-radius:10px; box-shadow:0 8px 24px rgba(0,0,0,.45); backdrop-filter:blur(4px);',
       formatter: (p: any) => {
         const d = p.data
         if (d && Array.isArray(d.coords)) return `${d.name}<br/>访问次数: ${d.value}`
@@ -319,6 +327,12 @@ const mapOption = computed(() => {
         <p class="sub">支持拖拽 nginx access.log（combined 格式）· 数据仅在本机处理</p>
       </div>
       <footer v-if="result" class="tips">滚轮缩放 · 拖拽平移 · 悬停查看数值</footer>
+      <div v-if="result" class="legend">
+        <span class="lg-title">访问量</span>
+        <span class="lg-end">少</span>
+        <i class="lg-bar"></i>
+        <span class="lg-end">多</span>
+      </div>
       <div v-if="analyzing" class="overlay"><span class="spin"></span>分析中…</div>
     </main>
   </div>
@@ -375,6 +389,16 @@ const mapOption = computed(() => {
   border-radius: 12px;
   padding: 14px;
   margin-bottom: 14px;
+  animation: rise 0.35s ease both;
+}
+.panel:nth-of-type(2) {
+  animation-delay: 0.08s;
+}
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
 }
 
 .field {
@@ -402,6 +426,11 @@ input {
 .drop.over {
   border-color: #ff4d5e;
   background: rgba(255, 77, 94, 0.08);
+  transform: scale(1.02);
+  box-shadow: 0 0 0 4px rgba(255, 77, 94, 0.12);
+}
+.drop {
+  transition: border-color 0.15s, background 0.15s, transform 0.15s, box-shadow 0.15s;
 }
 .drop-icon {
   color: #5d6b85;
@@ -595,6 +624,32 @@ h3 {
   padding: 5px 10px;
   border-radius: 8px;
   pointer-events: none;
+}
+.legend {
+  position: absolute;
+  right: 16px;
+  bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: #8b97ad;
+  background: rgba(12, 17, 28, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  padding: 6px 12px;
+  border-radius: 8px;
+  pointer-events: none;
+}
+.lg-title {
+  color: #aab6cb;
+  margin-right: 2px;
+}
+.lg-bar {
+  width: 90px;
+  height: 6px;
+  border-radius: 3px;
+  background: linear-gradient(90deg, rgb(230, 255, 250), rgb(230, 30, 50));
+  box-shadow: 0 0 8px rgba(230, 45, 60, 0.35);
 }
 .overlay {
   position: absolute;
