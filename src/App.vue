@@ -10,7 +10,7 @@ const db = ref<IpSearcher | null>(null)
 const dbLoading = ref(true)
 const dbError = ref('')
 
-const serverLoc = ref('北京')
+const serverLoc = ref('杭州')
 const result = ref<AnalyzeResult | null>(null)
 const fileName = ref('')
 const analyzing = ref(false)
