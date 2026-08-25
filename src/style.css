@@ -1,6 +1,8 @@
 :root {
   color-scheme: dark;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 * {
@@ -13,40 +15,43 @@ body,
   margin: 0;
   padding: 0;
   height: 100%;
-  background: #0f1420;
-  color: #e6edf3;
+  background: #0a0e17;
+  color: #e8edf5;
+}
+
+::selection {
+  background: rgba(255, 77, 94, 0.35);
 }
 
 button {
   cursor: pointer;
-  border: 1px solid #3a4a66;
-  background: #1b2436;
-  color: #e6edf3;
-  border-radius: 6px;
-  padding: 6px 12px;
-  font-size: 13px;
-  transition: background 0.15s;
-}
-
-button:hover {
-  background: #26344d;
-}
-
-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
 }
 
 input {
-  background: #1b2436;
-  border: 1px solid #3a4a66;
-  color: #e6edf3;
-  border-radius: 6px;
-  padding: 6px 10px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #e8edf5;
+  border-radius: 8px;
+  padding: 8px 10px;
   font-size: 13px;
+  font-family: inherit;
   outline: none;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+input:hover {
+  border-color: rgba(255, 255, 255, 0.2);
 }
 
 input:focus {
-  border-color: #4d7cff;
+  border-color: #ff4d5e;
+  background: rgba(255, 77, 94, 0.05);
+}
+
+input::placeholder {
+  color: #55627a;
 }
