@@ -34,12 +34,16 @@ export function parseLine(line: string): LogLine | null {
   return { ip, status: sm ? sm[2] : undefined }
 }
 
-export function parseLog(text: string): LogLine[] {
-  const lines = text.split(/\r?\n/)
+// 分片解析(供 Worker 分批调用并上报进度)
+export function parseLines(rawLines: string[]): LogLine[] {
   const out: LogLine[] = []
-  for (const line of lines) {
+  for (const line of rawLines) {
     const r = parseLine(line)
     if (r) out.push(r)
   }
   return out
+}
+
+export function parseLog(text: string): LogLine[] {
+  return parseLines(text.split(/\r?\n/))
 }

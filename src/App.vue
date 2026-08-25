@@ -1,17 +1,13 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, nextTick, watch } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import VChart from 'vue-echarts'
-import { Ip2Region, type IpSearcher } from './utils/ip2region'
-import { aggregateStats, serverCoord, type AnalyzeResult } from './utils/analyze'
-import { parseLog, type LogLine } from './utils/parseLog'
+import { serverCoord, type AnalyzeResult } from './utils/analyze'
 import { SERVER_REGIONS } from './utils/geo'
 
 const DB_URL = '/data/ip2region.xdb'
 
-const db = ref<IpSearcher | null>(null)
 const dbLoading = ref(true)
 const dbError = ref('')
-
 const selectedRegion = ref('华东1（杭州）')
 const serverLoc = computed(
   () => SERVER_REGIONS.find((r) => r.label === selectedRegion.value)?.city ?? '杭州'
@@ -21,6 +17,56 @@ const fileName = ref('')
 const analyzing = ref(false)
 const dragOver = ref(false)
 const fileInput = ref<HTMLInputElement>()
+const parseProgress = ref<number | null>(null)
+
+// ---------- Worker 通信 ----------
+let worker: Worker | null = null
+
+function onWorkerMessage(e: MessageEvent) {
+  const msg = e.data
+  switch (msg.type) {
+    case 'dbReady':
+      dbLoading.value = false
+      break
+    case 'dbError':
+    case 'error':
+      dbError.value = msg.message
+      dbLoading.value = false
+      analyzing.value = false
+      break
+    case 'progress':
+      parseProgress.value = msg.total ? Math.round((msg.done / msg.total) * 100) : null
+      break
+    case 'result':
+      result.value = msg.result
+      analyzing.value = false
+      parseProgress.value = null
+      break
+  }
+}
+
+onMounted(() => {
+  try {
+    worker = new Worker(new URL('./worker/analyzer.worker.ts', import.meta.url), {
+      type: 'module'
+    })
+    worker.onmessage = onWorkerMessage
+    worker.onerror = (e) => {
+      dbError.value = `Worker 异常: ${e.message}`
+      dbLoading.value = false
+      analyzing.value = false
+    }
+    worker.postMessage({ type: 'load', url: DB_URL })
+  } catch (e) {
+    dbError.value = e instanceof Error ? e.message : String(e)
+    dbLoading.value = false
+  }
+})
+
+onBeforeUnmount(() => {
+  worker?.terminate()
+  worker = null
+})
 
 const SAMPLE_IPS = [
   '114.114.114.114', '223.5.5.5', '223.6.6.6', '119.29.29.29', '101.226.4.6',
@@ -34,16 +80,6 @@ const SAMPLE_IPS = [
 const PATHS = ['/', '/index.html', '/api/login', '/api/user', '/static/app.js', '/favicon.ico', '/admin', '/api/data']
 const STATUSES = ['200', '200', '200', '304', '404', '301', '500']
 const METHODS = ['GET', 'POST', 'GET', 'HEAD']
-
-onMounted(async () => {
-  try {
-    db.value = await Ip2Region.create(DB_URL)
-  } catch (e) {
-    dbError.value = e instanceof Error ? e.message : String(e)
-  } finally {
-    dbLoading.value = false
-  }
-})
 
 function genSample(): string {
   const lines: string[] = []
@@ -61,31 +97,27 @@ function genSample(): string {
   return lines.join('\n')
 }
 
-async function runAnalyze(text: string) {
-  if (!db.value) return
+function runAnalyze(text: string) {
+  if (!worker || dbLoading.value || dbError.value) return
   analyzing.value = true
-  // 让 UI 先渲染 loading
-  await new Promise((r) => setTimeout(r, 30))
-  try {
-    allLines.value = parseLog(text)
-    recompute()
-  } finally {
-    analyzing.value = false
-  }
+  worker.postMessage({ type: 'analyze', text })
 }
 
 // ---------- 过滤联动 ----------
-const allLines = ref<LogLine[]>([])
 const statusFilter = ref<string | null>(null)
 const provinceFilter = ref<string | null>(null)
 const ispFilter = ref<string | null>(null)
 
 function recompute() {
-  if (!db.value || !allLines.value.length) return
-  result.value = aggregateStats(allLines.value, db.value, {
-    status: statusFilter.value,
-    province: provinceFilter.value,
-    isp: ispFilter.value
+  if (!worker || !result.value) return
+  analyzing.value = true
+  worker.postMessage({
+    type: 'refilter',
+    filters: {
+      status: statusFilter.value,
+      province: provinceFilter.value,
+      isp: ispFilter.value
+    }
   })
 }
 
@@ -405,7 +437,7 @@ const mapOption = computed(() => {
         </div>
 
         <div class="actions">
-          <button class="btn primary" :disabled="!db || dbLoading" @click="onSample">
+          <button class="btn primary" :disabled="dbLoading || !!dbError" @click="onSample">
             {{ dbLoading ? '数据库加载中…' : '载入示例数据' }}
           </button>
         </div>
@@ -533,7 +565,10 @@ const mapOption = computed(() => {
         <i class="lg-bar"></i>
         <span class="lg-end">多</span>
       </div>
-      <div v-if="analyzing" class="overlay"><span class="spin"></span>分析中…</div>
+      <div v-if="analyzing" class="overlay">
+        <span class="spin"></span>
+        分析中{{ parseProgress != null ? ` ${parseProgress}%` : '…' }}
+      </div>
     </main>
   </div>
 </template>
