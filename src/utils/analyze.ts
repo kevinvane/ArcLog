@@ -29,6 +29,20 @@ export interface SuspectIp {
   topPath: string // 该 IP 最常访问的路径
 }
 
+export interface TimelineCity {
+  key: string
+  name: string
+  province: string
+  coord: LngLat
+  counts: number[] // 与 buckets 一一对应
+}
+
+export interface Timeline {
+  granularity: 'hour' | 'day'
+  buckets: number[] // 各桶起始 epoch ms
+  cities: TimelineCity[]
+}
+
 // 可疑判定阈值
 const SUSPECT_MIN_REQ = 20 // 单 IP 最少请求数
 const SUSPECT_ERR_RATIO = 0.6 // 单 IP 错误占比阈值
@@ -54,6 +68,7 @@ export interface AnalyzeResult {
   topPaths: { path: string; count: number }[]
   suspects: SuspectIp[]
   alertedProvinces: string[] // 错误占比异常的省份短名
+  timeline: Timeline | null // 时间轴(过半日志无时间戳时为 null)
 }
 
 export function aggregateStats(
@@ -73,6 +88,40 @@ export function aggregateStats(
   let foreign = 0
   let unknown = 0
   let matched = 0
+
+  // ---- 时间轴预扫描: 时间范围与粒度 ----
+  let minTs = Infinity
+  let maxTs = -Infinity
+  let tsCount = 0
+  for (const l of lines) {
+    if (l.ts) {
+      if (l.ts < minTs) minTs = l.ts
+      if (l.ts > maxTs) maxTs = l.ts
+      tsCount++
+    }
+  }
+  let timeline: Timeline | null = null
+  let tlStart = 0
+  let tlGranMs = 0
+  let tlBuckets = 0
+  const cityTimeline = new Map<string, number[]>()
+  if (tsCount >= lines.length * 0.5 && maxTs > minTs) {
+    let gran: 'hour' | 'day' = 'hour'
+    tlGranMs = 3600_000
+    let nb = Math.floor((maxTs - minTs) / tlGranMs) + 1
+    if (nb > 1500) {
+      gran = 'day'
+      tlGranMs = 86400_000
+      nb = Math.floor((maxTs - minTs) / tlGranMs) + 1
+    }
+    if (nb <= 1500) {
+      tlStart = Math.floor(minTs / tlGranMs) * tlGranMs
+      const endAligned = Math.floor(maxTs / tlGranMs) * tlGranMs
+      tlBuckets = Math.floor((endAligned - tlStart) / tlGranMs) + 1
+      timeline = { granularity: gran, buckets: [], cities: [] }
+      for (let i = 0; i < tlBuckets; i++) timeline.buckets.push(tlStart + i * tlGranMs)
+    }
+  }
 
   for (const line of lines) {
     // 状态码过滤(无需查库, 先行短路)
@@ -137,6 +186,19 @@ export function aggregateStats(
       cityCounts.set(key, { name: cityShort || short, province: short, count: 1, coord })
     }
 
+    // 时间轴计数
+    if (timeline && line.ts) {
+      const idx = Math.floor((line.ts - tlStart) / tlGranMs)
+      if (idx >= 0 && idx < tlBuckets) {
+        let arr = cityTimeline.get(key)
+        if (!arr) {
+          arr = new Array(tlBuckets).fill(0)
+          cityTimeline.set(key, arr)
+        }
+        arr[idx]++
+      }
+    }
+
     ispCounts.set(isp, (ispCounts.get(isp) || 0) + 1)
   }
 
@@ -148,6 +210,18 @@ export function aggregateStats(
   provinces.sort((a, b) => b.count - a.count)
 
   const cities = [...cityCounts.values()].sort((a, b) => b.count - a.count)
+
+  if (timeline) {
+    timeline.cities = [...cityTimeline.entries()]
+      .map(([key, counts]) => {
+        const cs = cityCounts.get(key)!
+        return { key, name: cs.name, province: cs.province, coord: cs.coord, counts }
+      })
+      .sort(
+        (a, b) =>
+          b.counts.reduce((x, y) => x + y, 0) - a.counts.reduce((x, y) => x + y, 0)
+      )
+  }
 
   const status = [...statusCounts.entries()]
     .map(([code, count]) => ({ code, count }))
@@ -197,7 +271,8 @@ export function aggregateStats(
     isps,
     topPaths,
     suspects: suspects.slice(0, 10),
-    alertedProvinces
+    alertedProvinces,
+    timeline
   }
 }
 

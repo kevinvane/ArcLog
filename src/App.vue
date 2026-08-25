@@ -3,6 +3,7 @@ import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import VChart from 'vue-echarts'
 import { serverCoord, type AnalyzeResult } from './utils/analyze'
 import { SERVER_REGIONS } from './utils/geo'
+import type { CityStat } from './utils/analyze'
 
 const DB_URL = '/data/ip2region.xdb'
 
@@ -84,12 +85,16 @@ const METHODS = ['GET', 'POST', 'GET', 'HEAD']
 function genSample(): string {
   const lines: string[] = []
   const n = 3000
+  const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+  const p = (x: number) => String(x).padStart(2, '0')
   for (let i = 0; i < n; i++) {
     const ip = SAMPLE_IPS[Math.floor(Math.random() * SAMPLE_IPS.length)]
     const method = METHODS[Math.floor(Math.random() * METHODS.length)]
     const path = PATHS[Math.floor(Math.random() * PATHS.length)]
     const status = STATUSES[Math.floor(Math.random() * STATUSES.length)]
-    const t = new Date(Date.now() - Math.random() * 86400000).toUTCString()
+    const d = new Date(Date.now() - Math.random() * 86400000)
+    // nginx time_local 格式, 保证时间轴可解析
+    const t = `${p(d.getDate())}/${MON[d.getMonth()]}/${d.getFullYear()}:${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())} +0800`
     lines.push(
       `${ip} - - [${t}] "${method} ${path} HTTP/1.1" ${status} ${Math.floor(Math.random() * 5000)} "-" "Mozilla/5.0"`
     )
@@ -140,6 +145,61 @@ function clearFilters() {
 const hasFilter = computed(
   () => !!(statusFilter.value || provinceFilter.value || ispFilter.value)
 )
+
+// ---------- 时间轴回放 ----------
+const playIndex = ref<number | null>(null) // null = 总览
+const playing = ref(false)
+let playTimer: number | null = null
+
+function stopPlay() {
+  playing.value = false
+  if (playTimer != null) {
+    clearInterval(playTimer)
+    playTimer = null
+  }
+}
+
+function togglePlay() {
+  const tl = result.value?.timeline
+  if (!tl) return
+  if (playing.value) {
+    stopPlay()
+    return
+  }
+  if (playIndex.value == null) playIndex.value = 0
+  playing.value = true
+  playTimer = window.setInterval(() => {
+    const t = result.value?.timeline
+    if (!t || playIndex.value == null) return stopPlay()
+    playIndex.value = (playIndex.value + 1) % t.buckets.length
+  }, 1000)
+}
+
+function onSlide(e: Event) {
+  stopPlay()
+  playIndex.value = +(e.target as HTMLInputElement).value
+}
+
+// 新结果(新文件/过滤切换)时重置回总览
+watch(result, () => {
+  stopPlay()
+  playIndex.value = null
+})
+
+function fmtBucket(ts: number, gran: 'hour' | 'day'): string {
+  const d = new Date(ts)
+  const p = (n: number) => String(n).padStart(2, '0')
+  if (gran === 'hour') return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:00`
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+}
+
+const timeLabel = computed(() => {
+  const tl = result.value?.timeline
+  if (!tl) return ''
+  if (playIndex.value == null)
+    return `总览 · ${tl.granularity === 'hour' ? '按小时' : '按天'}`
+  return fmtBucket(tl.buckets[playIndex.value], tl.granularity)
+})
 
 async function onFile(e: Event) {
   const input = e.target as HTMLInputElement
@@ -288,8 +348,19 @@ function highlightOnMap(name: string | null) {
 const mapOption = computed(() => {
   if (!result.value) return {}
   const server = serverCoord(serverLoc.value)
-  // 城市级飞线: 按城市聚合的来源点(坐标缺失时 analyze 已回退省中心)
-  const origins = result.value.cities
+  // 城市级飞线: 回放模式下取当前时间片的分时计数, 否则用总览
+  const tl = result.value.timeline
+  const bi = playIndex.value
+  let origins: CityStat[]
+  if (tl && bi != null) {
+    origins = tl.cities
+      .map((c) => ({ name: c.name, province: c.province, coord: c.coord, count: c.counts[bi] || 0 }))
+      .filter((o) => o.count > 0)
+    origins.sort((a, b) => b.count - a.count)
+  } else {
+    origins = result.value.cities
+  }
+  const localMax = Math.max(1, ...origins.map((o) => o.count))
 
   // 按数量排名分成 5 级(quantile 分级), 保证任何分布下视觉层级都清晰
   const K = 5
@@ -374,8 +445,9 @@ const mapOption = computed(() => {
         zlevel: 2,
         effect: {
           show: true,
-          period: 4.5,
-          trailLength: 0.5,
+          // 回放模式: 周期略短于时间片(1s), 保证箭头在切换前飞完全程
+          period: tl && bi != null ? 0.85 : 4.5,
+          trailLength: tl && bi != null ? 0.35 : 0.5,
           symbol: 'arrow',
           symbolSize: 6,
           loop: true
@@ -396,7 +468,7 @@ const mapOption = computed(() => {
         coordinateSystem: 'geo',
         zlevel: 3,
         rippleEffect: { brushType: 'stroke' },
-        symbolSize: (val: number[]) => Math.max(5, Math.sqrt(val[2] / maxCount.value) * 32),
+        symbolSize: (val: number[]) => Math.max(5, Math.sqrt(val[2] / localMax) * 32),
         itemStyle: {
           color: (params: any) => (params.data && params.data.alert ? '#c084fc' : '#ff7a45')
         },
@@ -614,6 +686,18 @@ const mapOption = computed(() => {
         <span class="lg-end">少</span>
         <i class="lg-bar"></i>
         <span class="lg-end">多</span>
+      </div>
+      <div v-if="result?.timeline" class="timeline">
+        <button class="t-btn" @click="togglePlay">{{ playing ? '❚❚' : '▶' }}</button>
+        <input
+          class="t-slider"
+          type="range"
+          min="0"
+          :max="result.timeline.buckets.length - 1"
+          :value="playIndex ?? result.timeline.buckets.length - 1"
+          @input="onSlide"
+        />
+        <span class="t-label">{{ timeLabel }}</span>
       </div>
       <div v-if="analyzing" class="overlay">
         <span class="spin"></span>
@@ -1046,6 +1130,44 @@ h3 {
   right: 16px;
   display: flex;
   gap: 8px;
+}
+.timeline {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(12, 17, 28, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  padding: 6px 14px;
+  border-radius: 8px;
+}
+.t-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  color: #fff;
+  font-size: 11px;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(135deg, #ff4d5e, #c9184a);
+}
+.t-slider {
+  width: 220px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  accent-color: #ff4d5e;
+  cursor: pointer;
+}
+.t-label {
+  font-size: 11px;
+  color: #aab6cb;
+  font-variant-numeric: tabular-nums;
+  min-width: 96px;
+  text-align: center;
 }
 .tool-btn {
   font-size: 12px;
