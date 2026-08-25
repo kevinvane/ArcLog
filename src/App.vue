@@ -369,6 +369,17 @@ const mapOption = computed(() => {
             <span class="num">{{ s.count.toLocaleString() }}</span>
           </li>
         </ul>
+
+        <template v-if="result.topPaths.length">
+          <h3>路径 Top 10</h3>
+          <ul class="list paths">
+            <li v-for="(p, i) in result.topPaths" :key="p.path" :title="p.path">
+              <span class="rank" :class="'r' + (i < 3 ? i + 1 : 0)">{{ i + 1 }}</span>
+              <span class="path">{{ p.path }}</span>
+              <span class="num">{{ p.count.toLocaleString() }}</span>
+            </li>
+          </ul>
+        </template>
       </section>
     </aside>
 
@@ -618,6 +629,19 @@ h3 {
 }
 .codes li {
   grid-template-columns: 48px 1fr;
+}
+.paths li {
+  grid-template-columns: 22px 1fr 58px;
+}
+.path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 11px;
+  color: #c3cee0;
 }
 .rank {
   width: 20px;
