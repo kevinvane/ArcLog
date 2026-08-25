@@ -169,6 +169,52 @@ const maxCount = computed(() =>
   result.value ? Math.max(1, ...result.value.provinces.map((p) => p.count)) : 1
 )
 
+// ---------- 导出 ----------
+function triggerDownload(href: string, name: string) {
+  const a = document.createElement('a')
+  a.href = href
+  a.download = name
+  a.click()
+}
+
+function exportPng() {
+  const inst = chartComp.value?.chart
+  if (!inst) return
+  const url = inst.getDataURL({ type: 'png', pixelRatio: 2, backgroundColor: '#0a0e17' })
+  triggerDownload(url, `nginx-ip-map-${new Date().toISOString().slice(0, 10)}.png`)
+}
+
+function exportCsv() {
+  if (!result.value) return
+  const r = result.value
+  const q = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`
+  const lines: string[] = []
+  lines.push('省份,请求数')
+  r.provinces.forEach((p) => lines.push(`${q(p.name)},${p.count}`))
+  lines.push('')
+  lines.push('城市,所属省份,请求数')
+  r.cities.forEach((c) => lines.push(`${q(c.name)},${q(c.province)},${c.count}`))
+  lines.push('')
+  lines.push('状态码,次数')
+  r.status.forEach((s) => lines.push(`${q(s.code)},${s.count}`))
+  lines.push('')
+  lines.push('运营商,请求数')
+  r.isps.forEach((i) => lines.push(`${q(i.name)},${i.count}`))
+  lines.push('')
+  lines.push('请求路径,次数')
+  r.topPaths.forEach((t) => lines.push(`${q(t.path)},${t.count}`))
+  lines.push('')
+  lines.push('可疑IP,请求数,错误数,错误占比,主要路径')
+  r.suspects.forEach((s) =>
+    lines.push(`${q(s.ip)},${s.count},${s.errCount},${(s.errRatio * 100).toFixed(1)}%,${q(s.topPath)}`)
+  )
+  const bom = '\uFEFF'
+  const blob = new Blob([bom + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  triggerDownload(url, `nginx-stats-${new Date().toISOString().slice(0, 10)}.csv`)
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
+
 const maxIspCount = computed(() =>
   result.value ? Math.max(1, ...result.value.isps.map((x) => x.count)) : 1
 )
@@ -559,6 +605,10 @@ const mapOption = computed(() => {
         <p class="sub">支持拖拽 nginx access.log（combined 格式）· 数据仅在本机处理</p>
       </div>
       <footer v-if="result" class="tips">滚轮缩放 · 拖拽平移 · 悬停查看数值</footer>
+      <div v-if="result" class="map-tools">
+        <button class="tool-btn" @click="exportPng">导出 PNG</button>
+        <button class="tool-btn" @click="exportCsv">导出 CSV</button>
+      </div>
       <div v-if="result" class="legend">
         <span class="lg-title">访问量</span>
         <span class="lg-end">少</span>
@@ -989,6 +1039,27 @@ h3 {
   padding: 5px 10px;
   border-radius: 8px;
   pointer-events: none;
+}
+.map-tools {
+  position: absolute;
+  top: 14px;
+  right: 16px;
+  display: flex;
+  gap: 8px;
+}
+.tool-btn {
+  font-size: 12px;
+  color: #cdd6e4;
+  background: rgba(12, 17, 28, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  padding: 6px 12px;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.tool-btn:hover {
+  color: #fff;
+  background: rgba(255, 77, 94, 0.18);
+  border-color: rgba(255, 77, 94, 0.45);
 }
 .legend {
   position: absolute;
