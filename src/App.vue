@@ -65,6 +65,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  stopPlay()
   worker?.terminate()
   worker = null
 })
@@ -105,7 +106,15 @@ function genSample(): string {
 function runAnalyze(text: string) {
   if (!worker || dbLoading.value || dbError.value) return
   analyzing.value = true
-  worker.postMessage({ type: 'analyze', text })
+  worker.postMessage({
+    type: 'analyze',
+    text,
+    filters: {
+      status: statusFilter.value,
+      province: provinceFilter.value,
+      isp: ispFilter.value
+    }
+  })
 }
 
 // ---------- 过滤联动 ----------
@@ -247,7 +256,12 @@ function exportPng() {
 function exportCsv() {
   if (!result.value) return
   const r = result.value
-  const q = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`
+  // 防公式注入: 路径等字段来自日志(不可信), 以 =+-@ 开头的值前置单引号
+  const q = (v: unknown) => {
+    let s = String(v ?? '').replace(/"/g, '""')
+    if (/^[=+\-@\t\r]/.test(s)) s = `'` + s
+    return `"${s}"`
+  }
   const lines: string[] = []
   lines.push('省份,请求数')
   r.provinces.forEach((p) => lines.push(`${q(p.name)},${p.count}`))
@@ -378,10 +392,16 @@ const mapOption = computed(() => {
   const linesData = origins.flatMap((p, i) => {
     const level = Math.min(K - 1, Math.floor((i / n) * K))
     const strands = DENSITY_STRANDS[lineDensity.value][level]
+    // 确定性 hash: 同一城市抖动恒定, 重算时线束不跳变
+    let h = 0
+    for (let c = 0; c < p.name.length; c++) h = (h * 31 + p.name.charCodeAt(c)) | 0
     return Array.from({ length: strands }, (_, s) => ({
       coords: [
         // 起点轻微抖动, 让多股线在视觉上分开
-        [p.coord[0] + (Math.random() - 0.5) * 1.4, p.coord[1] + (Math.random() - 0.5) * 1.4],
+        [
+          p.coord[0] + (((h + s * 97) % 100) / 100 - 0.5) * 1.4,
+          p.coord[1] + (((h + s * 53) % 100) / 100 - 0.5) * 1.4
+        ],
         server
       ],
       value: p.count,

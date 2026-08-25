@@ -17,7 +17,7 @@ async function load(url: string) {
   ctx.postMessage({ type: 'dbReady' })
 }
 
-function analyze(text: string) {
+function analyze(text: string, filters: LogFilter = {}) {
   if (!db) return
   const raw = text.split(/\r?\n/)
   lines = []
@@ -26,7 +26,7 @@ function analyze(text: string) {
     ctx.postMessage({ type: 'progress', done: Math.min(i + CHUNK, raw.length), total: raw.length })
   }
   // 首次聚合: 每个 IP 的首次查询较慢, 但结果会缓存在 db 内
-  const result = aggregateStats(lines, db)
+  const result = aggregateStats(lines, db, filters)
   ctx.postMessage({ type: 'result', result })
 }
 
@@ -36,7 +36,7 @@ ctx.onmessage = async (e: MessageEvent) => {
     if (msg.type === 'load') {
       await load(msg.url)
     } else if (msg.type === 'analyze') {
-      analyze(msg.text)
+      analyze(msg.text, msg.filters)
     } else if (msg.type === 'refilter') {
       if (!db || !lines.length) return
       const result = aggregateStats(lines, db, (msg.filters || {}) as LogFilter)

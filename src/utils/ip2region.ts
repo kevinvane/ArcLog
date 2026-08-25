@@ -7,14 +7,16 @@ export interface RegionResult {
   province: string // 原始省份全名，如 "广东省"
   city: string
   isp: string
-  raw: string
 }
 
 export interface IpSearcher {
   search(ip: string): RegionResult
 }
 
-const EMPTY: RegionResult = { country: '', province: '', city: '', isp: '', raw: '' }
+const EMPTY: RegionResult = { country: '', province: '', city: '', isp: '' }
+
+// 缓存上限: 超过后清空(扫描器场景下唯一 IP 可达数十万, 防止内存无限增长)
+const CACHE_LIMIT = 50000
 
 export class Ip2Region implements IpSearcher {
   private view: DataView
@@ -24,9 +26,20 @@ export class Ip2Region implements IpSearcher {
   private cache = new Map<string, RegionResult>()
 
   constructor(buffer: ArrayBuffer) {
+    if (buffer.byteLength < 16) {
+      throw new Error(`ip2region 数据库文件过小(${buffer.byteLength} 字节), 可能已损坏`)
+    }
     this.view = new DataView(buffer)
     this.startIndexPtr = this.view.getUint32(8, true)
     this.endIndexPtr = this.view.getUint32(12, true)
+    const len = buffer.byteLength
+    if (
+      this.startIndexPtr < 256 ||
+      this.endIndexPtr < this.startIndexPtr + this.segSize ||
+      this.endIndexPtr > len - 1
+    ) {
+      throw new Error('ip2region 数据库索引指针非法, 文件可能已损坏或不受支持')
+    }
   }
 
   static async create(url: string): Promise<Ip2Region> {
@@ -37,9 +50,10 @@ export class Ip2Region implements IpSearcher {
   }
 
   private parseIP(ip: string): number[] | null {
+    // 先做严格格式校验, 拒绝 "1..2.3" / "1.2.3.4.5" 等畸形串
+    if (!/^(\d{1,3})(\.\d{1,3}){3}$/.test(ip)) return null
     const p = ip.split('.').map(Number)
-    if (p.length !== 4) return null
-    for (const x of p) if (isNaN(x) || x < 0 || x > 255) return null
+    for (const x of p) if (x < 0 || x > 255) return null
     return p
   }
 
@@ -74,6 +88,8 @@ export class Ip2Region implements IpSearcher {
     while (l <= h) {
       const m = (l + h) >> 1
       const p = this.startIndexPtr + m * SEG
+      // 边界防护: 索引越界视为无匹配(文件截断时兜底)
+      if (p + SEG > b.length) break
       const c1 = this.cmpAt(q, p, b)
       if (c1 < 0) {
         h = m - 1
@@ -86,6 +102,10 @@ export class Ip2Region implements IpSearcher {
       }
       dataLen = this.view.getUint16(p + 8, true)
       dataPtr = this.view.getUint32(p + 10, true)
+      // 数据区边界校验
+      if (dataLen < 4 || dataPtr < 0 || dataPtr + dataLen > b.length) {
+        return EMPTY
+      }
       break
     }
 
@@ -95,15 +115,14 @@ export class Ip2Region implements IpSearcher {
     }
 
     const bytes = new Uint8Array(this.view.buffer, this.view.byteOffset + dataPtr, dataLen)
-    const raw = new TextDecoder('utf-8').decode(bytes)
-    const parts = raw.split('|')
+    const parts = new TextDecoder('utf-8').decode(bytes).split('|')
     const result: RegionResult = {
       country: parts[0] || '',
       province: parts[1] || '',
       city: parts[2] || '',
-      isp: parts[3] || '',
-      raw
+      isp: parts[3] || ''
     }
+    if (this.cache.size >= CACHE_LIMIT) this.cache.clear()
     this.cache.set(ip, result)
     return result
   }
