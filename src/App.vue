@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, nextTick } from 'vue'
+import { ref, computed, onMounted, nextTick, watch } from 'vue'
 import VChart from 'vue-echarts'
 import { Ip2Region, type IpSearcher } from './utils/ip2region'
-import { analyze, serverCoord, type AnalyzeResult } from './utils/analyze'
+import { aggregateStats, serverCoord, type AnalyzeResult } from './utils/analyze'
+import { parseLog, type LogLine } from './utils/parseLog'
 import { SERVER_REGIONS } from './utils/geo'
 
 const DB_URL = '/data/ip2region.xdb'
@@ -66,11 +67,47 @@ async function runAnalyze(text: string) {
   // 让 UI 先渲染 loading
   await new Promise((r) => setTimeout(r, 30))
   try {
-    result.value = analyze(text, db.value, serverLoc.value)
+    allLines.value = parseLog(text)
+    recompute()
   } finally {
     analyzing.value = false
   }
 }
+
+// ---------- 过滤联动 ----------
+const allLines = ref<LogLine[]>([])
+const statusFilter = ref<string | null>(null)
+const provinceFilter = ref<string | null>(null)
+const ispFilter = ref<string | null>(null)
+
+function recompute() {
+  if (!db.value || !allLines.value.length) return
+  result.value = aggregateStats(allLines.value, db.value, {
+    status: statusFilter.value,
+    province: provinceFilter.value,
+    isp: ispFilter.value
+  })
+}
+
+watch([statusFilter, provinceFilter, ispFilter], recompute)
+
+function toggleStatus(code: string) {
+  statusFilter.value = statusFilter.value === code ? null : code
+}
+function toggleProvince(name: string) {
+  provinceFilter.value = provinceFilter.value === name ? null : name
+}
+function toggleIsp(name: string) {
+  ispFilter.value = ispFilter.value === name ? null : name
+}
+function clearFilters() {
+  statusFilter.value = null
+  provinceFilter.value = null
+  ispFilter.value = null
+}
+const hasFilter = computed(
+  () => !!(statusFilter.value || provinceFilter.value || ispFilter.value)
+)
 
 async function onFile(e: Event) {
   const input = e.target as HTMLInputElement
@@ -377,9 +414,22 @@ const mapOption = computed(() => {
       </section>
 
       <section v-if="result" class="panel stats">
+        <div v-if="hasFilter" class="filter-bar">
+          <span v-if="statusFilter" class="f-chip" @click="statusFilter = null">
+            状态码 {{ statusFilter }} ×
+          </span>
+          <span v-if="provinceFilter" class="f-chip" @click="provinceFilter = null">
+            省份 {{ provinceFilter }} ×
+          </span>
+          <span v-if="ispFilter" class="f-chip" @click="ispFilter = null">
+            运营商 {{ ispFilter }} ×
+          </span>
+          <button class="f-clear" @click="clearFilters">清除</button>
+        </div>
+
         <div class="stat-grid">
           <div class="stat"><b>{{ result.cities.length }}</b><span>覆盖城市</span></div>
-          <div class="stat"><b>{{ result.parsedLines.toLocaleString() }}</b><span>解析行数</span></div>
+          <div class="stat"><b>{{ (hasFilter ? result.matchedLines : result.totalLines).toLocaleString() }}</b><span>{{ hasFilter ? '匹配行数' : '解析行数' }}</span></div>
           <div class="stat"><b class="warn">{{ result.foreign }}</b><span>海外/未知</span></div>
           <div class="stat"><b :class="{ warn: result.unknown > 0 }">{{ result.unknown }}</b><span>无法解析</span></div>
         </div>
@@ -402,9 +452,10 @@ const mapOption = computed(() => {
             v-for="(p, i) in result.provinces.slice(0, 12)"
             :key="p.name"
             :id="'prov-' + p.name"
-            :class="{ active: hoveredProvince === p.name }"
+            :class="{ active: hoveredProvince === p.name, sel: provinceFilter === p.name }"
             @mouseenter="highlightOnMap(p.name)"
             @mouseleave="highlightOnMap(null)"
+            @click="toggleProvince(p.name)"
           >
             <span class="rank" :class="'r' + (i < 3 ? i + 1 : 0)">{{ i + 1 }}</span>
             <span class="name">
@@ -417,8 +468,11 @@ const mapOption = computed(() => {
 
         <h3>状态码</h3>
         <ul class="list codes">
-          <li v-for="s in result.status" :key="s.code">
-            <span class="chip" :class="statusClass(s.code)">{{ s.code }}</span>
+          <li v-for="s in result.status" :key="s.code" @click="toggleStatus(s.code)">
+            <span
+              class="chip"
+              :class="[statusClass(s.code), { dim: statusFilter && statusFilter !== s.code }]"
+            >{{ s.code }}</span>
             <span class="num">{{ s.count.toLocaleString() }}</span>
           </li>
         </ul>
@@ -426,7 +480,13 @@ const mapOption = computed(() => {
         <template v-if="result.isps.length">
           <h3>运营商</h3>
           <ul class="list isps">
-            <li v-for="isp in result.isps.slice(0, 8)" :key="isp.name" :title="isp.name">
+            <li
+              v-for="isp in result.isps.slice(0, 8)"
+              :key="isp.name"
+              :title="isp.name"
+              :class="{ sel: ispFilter === isp.name }"
+              @click="toggleIsp(isp.name)"
+            >
               <span class="name">{{ isp.name }}</span>
               <i class="bar"><i :style="{ width: (isp.count / maxIspCount) * 100 + '%' }"></i></i>
               <span class="num">{{ isp.count.toLocaleString() }}</span>
@@ -717,12 +777,61 @@ h3 {
 }
 .codes li {
   grid-template-columns: 48px 1fr;
+  cursor: pointer;
 }
 .paths li {
   grid-template-columns: 22px 1fr 58px;
 }
 .isps li {
   grid-template-columns: 64px 1fr 58px;
+  cursor: pointer;
+}
+.list li.sel {
+  background: rgba(255, 77, 94, 0.16);
+  box-shadow: inset 2px 0 0 #ff4d5e;
+}
+.chip {
+  transition: opacity 0.15s, transform 0.12s;
+}
+.chip:hover {
+  transform: translateY(-1px);
+}
+.chip.dim {
+  opacity: 0.3;
+}
+
+.filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+.f-chip {
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  color: #ffb3bb;
+  background: rgba(255, 77, 94, 0.15);
+  border: 1px solid rgba(255, 77, 94, 0.35);
+  cursor: pointer;
+}
+.f-chip:hover {
+  background: rgba(255, 77, 94, 0.28);
+}
+.f-clear {
+  margin-left: auto;
+  font-size: 11px;
+  color: #93a1ba;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 6px;
+  padding: 3px 8px;
+}
+.f-clear:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.08);
 }
 .path {
   overflow: hidden;

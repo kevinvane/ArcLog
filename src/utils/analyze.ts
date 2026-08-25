@@ -1,5 +1,5 @@
 import type { IpSearcher } from './ip2region'
-import { parseLog } from './parseLog'
+import type { LogLine } from './parseLog'
 import {
   shortProvince,
   provinceCenter,
@@ -35,9 +35,16 @@ const SUSPECT_ERR_RATIO = 0.6 // 单 IP 错误占比阈值
 const ALERT_MIN_PROV_REQ = 30 // 省份最少请求数(避免小样本误报)
 const ALERT_PROV_ERR_RATIO = 0.5 // 省份错误占比阈值
 
+// 过滤条件: 全部为 null/undefined 表示不过滤
+export interface LogFilter {
+  status?: string | null // 精确状态码, 如 "404"
+  province?: string | null // 省份短名, 如 "江苏"
+  isp?: string | null
+}
+
 export interface AnalyzeResult {
   totalLines: number
-  parsedLines: number
+  matchedLines: number
   foreign: number
   unknown: number
   provinces: ProvinceStat[]
@@ -49,12 +56,11 @@ export interface AnalyzeResult {
   alertedProvinces: string[] // 错误占比异常的省份短名
 }
 
-export function analyze(
-  text: string,
+export function aggregateStats(
+  lines: LogLine[],
   db: IpSearcher,
-  serverLoc: string
+  filters: LogFilter = {}
 ): AnalyzeResult {
-  const lines = parseLog(text)
   const provinceCounts = new Map<string, number>()
   const cityCounts = new Map<string, CityStat>()
   const statusCounts = new Map<string, number>()
@@ -66,14 +72,11 @@ export function analyze(
   const provinceErr = new Map<string, number>()
   let foreign = 0
   let unknown = 0
+  let matched = 0
 
   for (const line of lines) {
-    if (line.status) {
-      statusCounts.set(line.status, (statusCounts.get(line.status) || 0) + 1)
-    }
-    if (line.path && line.path !== '-') {
-      pathCounts.set(line.path, (pathCounts.get(line.path) || 0) + 1)
-    }
+    // 状态码过滤(无需查库, 先行短路)
+    if (filters.status && line.status !== filters.status) continue
 
     const region = db.search(line.ip)
     if (!region || !region.country) {
@@ -90,6 +93,21 @@ export function analyze(
       foreign++
       continue
     }
+    const isp = region.isp && region.isp !== '0' ? region.isp : '未知'
+
+    // 省份 / 运营商过滤
+    if (filters.province && short !== filters.province) continue
+    if (filters.isp && isp !== filters.isp) continue
+
+    matched++
+
+    if (line.status) {
+      statusCounts.set(line.status, (statusCounts.get(line.status) || 0) + 1)
+    }
+    if (line.path && line.path !== '-') {
+      pathCounts.set(line.path, (pathCounts.get(line.path) || 0) + 1)
+    }
+
     provinceCounts.set(short, (provinceCounts.get(short) || 0) + 1)
 
     // 错误请求(4xx/5xx)计入省份与 IP 明细
@@ -119,7 +137,6 @@ export function analyze(
       cityCounts.set(key, { name: cityShort || short, province: short, count: 1, coord })
     }
 
-    const isp = region.isp && region.isp !== '0' ? region.isp : '未知'
     ispCounts.set(isp, (ispCounts.get(isp) || 0) + 1)
   }
 
@@ -171,7 +188,7 @@ export function analyze(
 
   return {
     totalLines: lines.length,
-    parsedLines: lines.length,
+    matchedLines: matched,
     foreign,
     unknown,
     provinces,
