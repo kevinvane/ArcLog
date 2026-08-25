@@ -15,6 +15,7 @@ export interface AnalyzeResult {
   unknown: number
   provinces: ProvinceStat[]
   status: { code: string; count: number }[]
+  isps: { name: string; count: number }[]
   topPaths: { path: string; count: number }[]
 }
 
@@ -27,6 +28,7 @@ export function analyze(
   const provinceCounts = new Map<string, number>()
   const statusCounts = new Map<string, number>()
   const pathCounts = new Map<string, number>()
+  const ispCounts = new Map<string, number>()
   let foreign = 0
   let unknown = 0
 
@@ -54,6 +56,8 @@ export function analyze(
       continue
     }
     provinceCounts.set(short, (provinceCounts.get(short) || 0) + 1)
+    const isp = region.isp && region.isp !== '0' ? region.isp : '未知'
+    ispCounts.set(isp, (ispCounts.get(isp) || 0) + 1)
   }
 
   const provinces: ProvinceStat[] = []
@@ -65,6 +69,10 @@ export function analyze(
 
   const status = [...statusCounts.entries()]
     .map(([code, count]) => ({ code, count }))
+    .sort((a, b) => b.count - a.count)
+
+  const isps = [...ispCounts.entries()]
+    .map(([name, count]) => ({ name, count }))
     .sort((a, b) => b.count - a.count)
 
   const topPaths = [...pathCounts.entries()]
@@ -79,6 +87,7 @@ export function analyze(
     unknown,
     provinces,
     status,
+    isps,
     topPaths
   }
 }

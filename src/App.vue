@@ -100,6 +100,10 @@ const maxCount = computed(() =>
   result.value ? Math.max(1, ...result.value.provinces.map((p) => p.count)) : 1
 )
 
+const maxIspCount = computed(() =>
+  result.value ? Math.max(1, ...result.value.isps.map((x) => x.count)) : 1
+)
+
 function statusClass(code: string): string {
   if (code.startsWith('2')) return 's2'
   if (code.startsWith('3')) return 's3'
@@ -370,6 +374,17 @@ const mapOption = computed(() => {
           </li>
         </ul>
 
+        <template v-if="result.isps.length">
+          <h3>运营商</h3>
+          <ul class="list isps">
+            <li v-for="isp in result.isps.slice(0, 8)" :key="isp.name" :title="isp.name">
+              <span class="name">{{ isp.name }}</span>
+              <i class="bar"><i :style="{ width: (isp.count / maxIspCount) * 100 + '%' }"></i></i>
+              <span class="num">{{ isp.count.toLocaleString() }}</span>
+            </li>
+          </ul>
+        </template>
+
         <template v-if="result.topPaths.length">
           <h3>路径 Top 10</h3>
           <ul class="list paths">
@@ -632,6 +647,9 @@ h3 {
 }
 .paths li {
   grid-template-columns: 22px 1fr 58px;
+}
+.isps li {
+  grid-template-columns: 64px 1fr 58px;
 }
 .path {
   overflow: hidden;
