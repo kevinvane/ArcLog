@@ -97,6 +97,9 @@ const CITY_COORDS: Record<string, LngLat> = {
   海口: [110.2, 20.04],
   石家庄: [114.51, 38.04],
   太原: [112.55, 37.87],
+  张家口: [114.88, 40.82],
+  乌兰察布: [113.13, 41.0],
+  河源: [114.7, 23.74],
   沈阳: [123.43, 41.8],
   大连: [121.61, 38.91],
   长春: [125.32, 43.9],
@@ -112,6 +115,22 @@ const CITY_COORDS: Record<string, LngLat> = {
   澳门: [113.54, 22.19],
   台北: [121.56, 25.03]
 }
+
+// 可选的服务器地域（阿里云地域名 -> 城市）
+export const SERVER_REGIONS: { label: string; city: string }[] = [
+  { label: '华北1（青岛）', city: '青岛' },
+  { label: '华北2（北京）', city: '北京' },
+  { label: '华北3（张家口）', city: '张家口' },
+  { label: '华北5（呼和浩特）', city: '呼和浩特' },
+  { label: '华北6（乌兰察布）', city: '乌兰察布' },
+  { label: '华东1（杭州）', city: '杭州' },
+  { label: '华东2（上海）', city: '上海' },
+  { label: '华南1（深圳）', city: '深圳' },
+  { label: '华南2（河源）', city: '河源' },
+  { label: '华南3（广州）', city: '广州' },
+  { label: '西南1（成都）', city: '成都' },
+  { label: '中国香港', city: '香港' }
+]
 
 // 解析服务器位置: 支持 "lng,lat"、城市名或省份名; 默认北京
 export function resolveServerLocation(input: string): LngLat {

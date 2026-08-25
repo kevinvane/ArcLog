@@ -3,6 +3,7 @@ import { ref, computed, onMounted, nextTick } from 'vue'
 import VChart from 'vue-echarts'
 import { Ip2Region, type IpSearcher } from './utils/ip2region'
 import { analyze, serverCoord, type AnalyzeResult } from './utils/analyze'
+import { SERVER_REGIONS } from './utils/geo'
 
 const DB_URL = '/data/ip2region.xdb'
 
@@ -10,7 +11,10 @@ const db = ref<IpSearcher | null>(null)
 const dbLoading = ref(true)
 const dbError = ref('')
 
-const serverLoc = ref('杭州')
+const selectedRegion = ref('华东1（杭州）')
+const serverLoc = computed(
+  () => SERVER_REGIONS.find((r) => r.label === selectedRegion.value)?.city ?? '杭州'
+)
 const result = ref<AnalyzeResult | null>(null)
 const fileName = ref('')
 const analyzing = ref(false)
@@ -294,7 +298,11 @@ const mapOption = computed(() => {
       <section class="panel">
         <div class="field">
           <label>服务器位置</label>
-          <input v-model="serverLoc" placeholder="省份名 或 lng,lat，如 北京" />
+          <select v-model="selectedRegion">
+            <option v-for="r in SERVER_REGIONS" :key="r.label" :value="r.label">
+              {{ r.label }}
+            </option>
+          </select>
         </div>
 
         <div

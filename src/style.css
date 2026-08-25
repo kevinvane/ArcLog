@@ -31,7 +31,8 @@ button {
   font-family: inherit;
 }
 
-input {
+input,
+select {
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(255, 255, 255, 0.1);
   color: #e8edf5;
@@ -43,15 +44,35 @@ input {
   transition: border-color 0.15s, background 0.15s;
 }
 
-input:hover {
+input:hover,
+select:hover {
   border-color: rgba(255, 255, 255, 0.2);
 }
 
-input:focus {
+input:focus,
+select:focus {
   border-color: #ff4d5e;
   background: rgba(255, 77, 94, 0.05);
 }
 
 input::placeholder {
   color: #55627a;
+}
+
+select {
+  width: 100%;
+  cursor: pointer;
+  appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, #77839b 50%),
+    linear-gradient(135deg, #77839b 50%, transparent 50%);
+  background-position:
+    calc(100% - 16px) 55%,
+    calc(100% - 11px) 55%;
+  background-size: 5px 5px;
+  background-repeat: no-repeat;
+}
+
+select option {
+  background: #111827;
+  color: #e8edf5;
 }
