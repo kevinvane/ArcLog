@@ -28,9 +28,21 @@
 |  **报告导出** | 一键导出地图 PNG 快照（2x）与完整统计 CSV（含 BOM，Excel 直开） |
 |  **纯前端架构** | 解析 + IP 定位 + 聚合全部运行在 Web Worker，大日志不卡 UI，带实时进度 |
 
+## 环境要求
+
+| 依赖 | 最低版本 | 说明 |
+| --- | --- | --- |
+| Node.js | 18.0+ | 开发/构建需要；仅使用构建产物（`dist/`）则无需安装 |
+| npm | 9.0+ | 随 Node.js 附带 |
+| 浏览器 | 见下方 | 运行时需支持 ES Module Worker |
+
+支持的浏览器：Chrome / Edge 80+、Firefox 114+、Safari 15+
+
 ## 快速开始
 
 ```bash
+git clone https://github.com/kevinvane/ArcLog.git
+cd ArcLog
 npm install
 npm run dev        # 开发模式, 浏览器打开 http://127.0.0.1:5173/
 npm run build      # 生产构建 → dist/ (可部署到任意静态服务器)
