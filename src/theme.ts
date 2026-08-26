@@ -76,9 +76,25 @@ export const ACCENTS: Accent[] = [
     lineTo: [124, 58, 237],
     point: '#f472b6',
     alert: '#fbbf24',
+    alertLight: '#d97706',
     mapArea: '#1c1730',
     mapHover: '#2b2350',
     mapBorder: '#3d3466'
+  },
+  {
+    id: 'amber',
+    label: '琥珀橙',
+    accent: '#f59e0b',
+    accent2: '#b45309',
+    bgDark: '#0f0d08',
+    glowDark: 'rgba(245, 158, 11, 0.05)',
+    lineFrom: [255, 243, 218],
+    lineTo: [180, 83, 9],
+    point: '#38bdf8',
+    alert: '#a78bfa',
+    mapArea: '#211a0e',
+    mapHover: '#35290f',
+    mapBorder: '#51401f'
   }
 ]
 
