@@ -222,9 +222,9 @@ const timeLabel = computed(() => {
 async function onFile(e: Event) {
   if (!canLoad.value) return
   const input = e.target as HTMLInputElement
-  input.value = '' // 允许重复选择同一文件
   const file = input.files?.[0]
   if (!file) return
+  input.value = '' // 允许重复选择同一文件
   fileName.value = file.name
   const text = await file.text()
   await runAnalyze(text)
