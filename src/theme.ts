@@ -11,7 +11,8 @@ export interface Accent {
   lineFrom: [number, number, number] // 飞线渐变·量少(暗色模式)
   lineTo: [number, number, number] // 飞线渐变·量大(暗色模式)
   point: string // 来源涟漪点
-  alert: string // 可疑预警点
+  alert: string // 可疑预警点(暗色模式)
+  alertLight?: string // 可疑预警点(日间模式覆盖, 避免与强调色撞色)
   mapArea: string // 暗色地图底色
   mapHover: string
   mapBorder: string
@@ -59,6 +60,7 @@ export const ACCENTS: Accent[] = [
     lineTo: [5, 150, 105],
     point: '#bef264',
     alert: '#fb7185',
+    alertLight: '#d97706',
     mapArea: '#10201b',
     mapHover: '#1a332b',
     mapBorder: '#2b4a41'
@@ -180,8 +182,8 @@ export function resolveTheme(accentId: string, mode: ModeId): ResolvedTheme {
         mapBorder: '#ffffff',
         lineFrom: [100, 116, 139] as [number, number, number],
         lineTo: hexToRgb(a.accent2),
-        point: '#ea580c',
-        alert: '#7c3aed',
+        point: a.accent,
+        alert: a.alertLight || '#7c3aed',
         server: '#059669',
         tipBg: 'rgba(255, 255, 255, 0.97)',
         tipText: '#17233a',
