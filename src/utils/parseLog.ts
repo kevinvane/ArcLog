@@ -7,12 +7,13 @@ export interface LogLine {
   path?: string
   method?: string
   ts?: number // epoch ms
+  ua?: string // User-Agent 原文
 }
 
 // 标准 combined 格式:
 // $remote_addr - $remote_user [$time_local] "$request" $status $body_bytes_sent "$http_referer" "$http_user_agent"
 const COMBINED_RE =
-  /^(\S+) \S+ \S+ \[([^\]]+)\] "(\S+) (\S+) (\S+)" (\d{3}) (\S+)/
+  /^(\S+) \S+ \S+ \[([^\]]+)\] "(\S+) (\S+) (\S+)" (\d{3}) (\S+)(?: "([^"]*)" "([^"]*)")?/
 
 const MONTHS: Record<string, number> = {
   Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5,
@@ -47,7 +48,8 @@ export function parseLine(line: string): LogLine | null {
       status: m[6],
       method: m[3],
       path: m[4],
-      ts: parseNginxTime(m[2])
+      ts: parseNginxTime(m[2]),
+      ua: m[9]
     }
   }
 

@@ -91,6 +91,13 @@ const SAMPLE_IPS = [
 const PATHS = ['/', '/index.html', '/api/login', '/api/user', '/static/app.js', '/favicon.ico', '/admin', '/api/data']
 const STATUSES = ['200', '200', '200', '304', '404', '301', '500']
 const METHODS = ['GET', 'POST', 'GET', 'HEAD']
+const UAS = [
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126.0 Safari/537.36',
+  'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) Mobile Safari/604.1',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:127.0) Gecko/20100101 Firefox/127.0',
+  'Mozilla/5.0 (compatible; Baiduspider/2.0; +http://www.baidu.com/search/spider.html)',
+  'curl/8.4.0'
+]
 
 function genSample(): string {
   const lines: string[] = []
@@ -102,11 +109,12 @@ function genSample(): string {
     const method = METHODS[Math.floor(Math.random() * METHODS.length)]
     const path = PATHS[Math.floor(Math.random() * PATHS.length)]
     const status = STATUSES[Math.floor(Math.random() * STATUSES.length)]
+    const ua = UAS[Math.floor(Math.random() * UAS.length)]
     const d = new Date(Date.now() - Math.random() * 86400000)
     // nginx time_local 格式, 保证时间轴可解析
     const t = `${p(d.getDate())}/${MON[d.getMonth()]}/${d.getFullYear()}:${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())} +0800`
     lines.push(
-      `${ip} - - [${t}] "${method} ${path} HTTP/1.1" ${status} ${Math.floor(Math.random() * 5000)} "-" "Mozilla/5.0"`
+      `${ip} - - [${t}] "${method} ${path} HTTP/1.1" ${status} ${Math.floor(Math.random() * 5000)} "-" "${ua}"`
     )
   }
   return lines.join('\n')
@@ -287,6 +295,9 @@ function exportCsv() {
   lines.push('运营商,请求数')
   r.isps.forEach((i) => lines.push(`${q(i.name)},${i.count}`))
   lines.push('')
+  lines.push('客户端,请求数')
+  r.uas.forEach((u) => lines.push(`${q(u.name)},${u.count}`))
+  lines.push('')
   lines.push('请求路径,次数')
   r.topPaths.forEach((t) => lines.push(`${q(t.path)},${t.count}`))
   lines.push('')
@@ -303,6 +314,10 @@ function exportCsv() {
 
 const maxIspCount = computed(() =>
   result.value ? Math.max(1, ...result.value.isps.map((x) => x.count)) : 1
+)
+
+const maxUaCount = computed(() =>
+  result.value ? Math.max(1, ...result.value.uas.map((x) => x.count)) : 1
 )
 
 const alertProvinceSet = computed(
@@ -688,6 +703,17 @@ const mapOption = computed(() => {
           </ul>
         </template>
 
+        <template v-if="result.uas.length">
+          <h3>客户端</h3>
+          <ul class="list uas">
+            <li v-for="u in result.uas.slice(0, 8)" :key="u.name" :title="u.name">
+              <span class="name">{{ u.name }}</span>
+              <i class="bar"><i :style="{ width: (u.count / maxUaCount) * 100 + '%' }"></i></i>
+              <span class="num">{{ u.count.toLocaleString() }}</span>
+            </li>
+          </ul>
+        </template>
+
         <template v-if="result.topPaths.length">
           <h3>路径 Top 10</h3>
           <ul class="list paths">
@@ -1018,6 +1044,9 @@ h3 {
 .isps li {
   grid-template-columns: 64px 1fr 58px;
   cursor: pointer;
+}
+.uas li {
+  grid-template-columns: 64px 1fr 58px;
 }
 .list li.sel {
   background: rgba(255, 77, 94, 0.16);

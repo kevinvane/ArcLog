@@ -49,6 +49,20 @@ const SUSPECT_ERR_RATIO = 0.6 // 单 IP 错误占比阈值
 const ALERT_MIN_PROV_REQ = 30 // 省份最少请求数(避免小样本误报)
 const ALERT_PROV_ERR_RATIO = 0.5 // 省份错误占比阈值
 
+// UA 归类: 爬虫/脚本 → 移动端 → 主流浏览器 → 其他
+export function classifyUa(ua?: string): string {
+  if (!ua || ua === '-' || !ua.trim()) return '未知'
+  const s = ua.toLowerCase()
+  if (/bot|spider|crawl|slurp|scan|curl|wget|python|java|go-http|okhttp|libwww|httpclient/.test(s))
+    return '爬虫/脚本'
+  if (/mobile|android|iphone|ipad|harmony/.test(s)) return '移动端'
+  if (/edg\//.test(s)) return 'Edge'
+  if (/chrome|crios/.test(s)) return 'Chrome'
+  if (/firefox|fxios/.test(s)) return 'Firefox'
+  if (/safari/.test(s)) return 'Safari'
+  return '其他'
+}
+
 // 过滤条件: 全部为 null/undefined 表示不过滤
 export interface LogFilter {
   status?: string | null // 精确状态码, 如 "404"
@@ -65,6 +79,7 @@ export interface AnalyzeResult {
   cities: CityStat[]
   status: { code: string; count: number }[]
   isps: { name: string; count: number }[]
+  uas: { name: string; count: number }[]
   topPaths: { path: string; count: number }[]
   suspects: SuspectIp[]
   alertedProvinces: string[] // 错误占比异常的省份短名
@@ -81,6 +96,7 @@ export function aggregateStats(
   const statusCounts = new Map<string, number>()
   const pathCounts = new Map<string, number>()
   const ispCounts = new Map<string, number>()
+  const uaCounts = new Map<string, number>()
   // 单 IP 明细: 请求数 / 错误数 / 路径计数(用于可疑检测)
   const ipStats = new Map<string, { count: number; err: number; paths: Map<string, number> }>()
   // 省份错误计数
@@ -200,6 +216,8 @@ export function aggregateStats(
     }
 
     ispCounts.set(isp, (ispCounts.get(isp) || 0) + 1)
+    const uaName = classifyUa(line.ua)
+    uaCounts.set(uaName, (uaCounts.get(uaName) || 0) + 1)
   }
 
   const provinces: ProvinceStat[] = []
@@ -228,6 +246,10 @@ export function aggregateStats(
     .sort((a, b) => b.count - a.count)
 
   const isps = [...ispCounts.entries()]
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count)
+
+  const uas = [...uaCounts.entries()]
     .map(([name, count]) => ({ name, count }))
     .sort((a, b) => b.count - a.count)
 
@@ -269,6 +291,7 @@ export function aggregateStats(
     cities,
     status,
     isps,
+    uas,
     topPaths,
     suspects: suspects.slice(0, 10),
     alertedProvinces,
