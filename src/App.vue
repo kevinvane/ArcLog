@@ -312,6 +312,73 @@ function exportCsv() {
   setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
+// 单文件 HTML 报告: 地图快照 + 全部统计, 可直接发送给他人离线查看
+function exportHtml() {
+  const r = result.value
+  if (!r) return
+  const inst = chartComp.value?.chart
+  const png = inst
+    ? inst.getDataURL({ type: 'png', pixelRatio: 2, backgroundColor: '#0a0e17' })
+    : ''
+  const esc = (s: unknown) =>
+    String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!)
+  const table = (title: string, head: string[], rows: (string | number)[][]) =>
+    rows.length
+      ? `<h2>${esc(title)}</h2><table><thead><tr>${head
+          .map((h) => `<th>${esc(h)}</th>`)
+          .join('')}</tr></thead><tbody>${rows
+          .map((row) => `<tr>${row.map((c) => `<td>${esc(c)}</td>`).join('')}</tr>`)
+          .join('')}</tbody></table>`
+      : ''
+
+  const filters = [
+    statusFilter.value && `状态码 ${statusFilter.value}`,
+    provinceFilter.value && `省份 ${provinceFilter.value}`,
+    ispFilter.value && `运营商 ${ispFilter.value}`
+  ].filter(Boolean)
+
+  const html = `<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<title>ArcLog 分析报告 - ${esc(fileName.value || '未命名')}</title>
+<style>
+body{background:#0a0e17;color:#e8edf5;font-family:-apple-system,'PingFang SC','Microsoft YaHei',sans-serif;margin:0;padding:32px}
+.wrap{max-width:960px;margin:0 auto}
+h1{font-size:22px;margin:0 0 4px}
+h2{font-size:15px;border-bottom:1px solid #24304a;padding-bottom:6px;margin:28px 0 10px}
+.meta{color:#77839b;font-size:12px;margin-bottom:20px}
+img{width:100%;border-radius:12px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{text-align:left;padding:6px 10px;border-bottom:1px solid #1c2740}
+th{color:#93a1ba;font-weight:600}
+td:last-child,th:last-child{text-align:right;font-variant-numeric:tabular-nums}
+.tag{display:inline-block;background:rgba(255,77,94,.15);color:#ffb3bb;border-radius:6px;padding:2px 8px;font-size:12px;margin-right:6px}
+footer{margin-top:36px;color:#5d6b85;font-size:11px;text-align:center}
+</style></head><body><div class="wrap">
+<h1>ArcLog · 访问来源分析报告</h1>
+<div class="meta">生成于 ${new Date().toLocaleString()} · 文件: ${esc(fileName.value)} · 共 ${r.totalLines.toLocaleString()} 行${
+    filters.length ? ` · 筛选: ${filters.map(esc).join(' / ')}` : ''
+  }</div>
+${png ? `<img src="${png}" alt="飞线地图">` : ''}
+${table('省份分布', ['省份', '请求数'], r.provinces.map((p) => [p.name, p.count]))}
+${table('城市 Top 20', ['城市', '所属省', '请求数'], r.cities.slice(0, 20).map((c) => [c.name, c.province, c.count]))}
+${table('状态码', ['状态码', '次数'], r.status.map((s) => [s.code, s.count]))}
+${table('运营商', ['运营商', '请求数'], r.isps.map((i) => [i.name, i.count]))}
+${table('客户端', ['类型', '请求数'], r.uas.map((u) => [u.name, u.count]))}
+${table('路径 Top 10', ['路径', '次数'], r.topPaths.map((t) => [t.path, t.count]))}
+${table(
+    '可疑 IP',
+    ['IP', '请求数', '错误数', '错误占比', '主要路径'],
+    r.suspects.map((s) => [s.ip, s.count, s.errCount, (s.errRatio * 100).toFixed(1) + '%', s.topPath])
+  )}
+<footer>由 ArcLog 生成 · 数据仅来源于所分析的日志文件</footer>
+</div></body></html>`
+
+  const blob = new Blob([html], { type: 'text/html;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  triggerDownload(url, `arclog-report-${new Date().toISOString().slice(0, 10)}.html`)
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
+
 const maxIspCount = computed(() =>
   result.value ? Math.max(1, ...result.value.isps.map((x) => x.count)) : 1
 )
@@ -750,6 +817,7 @@ const mapOption = computed(() => {
       <div v-if="result" class="map-tools">
         <button class="tool-btn" @click="exportPng">导出 PNG</button>
         <button class="tool-btn" @click="exportCsv">导出 CSV</button>
+        <button class="tool-btn" @click="exportHtml">导出报告</button>
       </div>
       <div v-if="result" class="legend">
         <span class="lg-title">访问量</span>
