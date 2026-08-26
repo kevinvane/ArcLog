@@ -8,7 +8,9 @@ import type { CityStat } from './utils/analyze'
 const DB_URL = '/data/ip2region.xdb'
 
 const dbLoading = ref(true)
-const dbError = ref('')
+const dbError = ref('') // 数据库加载失败
+const runError = ref('') // 运行期错误(解析/聚合阶段)
+const canLoad = computed(() => !dbLoading.value && !dbError.value)
 const selectedRegion = ref('华东1（杭州）')
 const serverLoc = computed(
   () => SERVER_REGIONS.find((r) => r.label === selectedRegion.value)?.city ?? '杭州'
@@ -30,16 +32,21 @@ function onWorkerMessage(e: MessageEvent) {
       dbLoading.value = false
       break
     case 'dbError':
-    case 'error':
       dbError.value = msg.message
       dbLoading.value = false
       analyzing.value = false
+      break
+    case 'error':
+      runError.value = msg.message
+      analyzing.value = false
+      parseProgress.value = null
       break
     case 'progress':
       parseProgress.value = msg.total ? Math.round((msg.done / msg.total) * 100) : null
       break
     case 'result':
       result.value = msg.result
+      runError.value = ''
       analyzing.value = false
       parseProgress.value = null
       break
@@ -53,7 +60,9 @@ onMounted(() => {
     })
     worker.onmessage = onWorkerMessage
     worker.onerror = (e) => {
-      dbError.value = `Worker 异常: ${e.message}`
+      const message = `Worker 异常: ${e.message}`
+      if (dbLoading.value) dbError.value = message
+      else runError.value = message
       dbLoading.value = false
       analyzing.value = false
     }
@@ -211,7 +220,9 @@ const timeLabel = computed(() => {
 })
 
 async function onFile(e: Event) {
+  if (!canLoad.value) return
   const input = e.target as HTMLInputElement
+  input.value = '' // 允许重复选择同一文件
   const file = input.files?.[0]
   if (!file) return
   fileName.value = file.name
@@ -222,6 +233,7 @@ async function onFile(e: Event) {
 async function onDrop(e: DragEvent) {
   e.preventDefault()
   dragOver.value = false
+  if (!canLoad.value) return
   const file = e.dataTransfer?.files?.[0]
   if (!file) return
   fileName.value = file.name
@@ -553,8 +565,8 @@ const mapOption = computed(() => {
 
         <div
           class="drop"
-          :class="{ over: dragOver }"
-          @dragover.prevent="dragOver = true"
+          :class="{ over: dragOver, disabled: !canLoad }"
+          @dragover.prevent="canLoad && (dragOver = true)"
           @dragleave.prevent="dragOver = false"
           @drop="onDrop"
         >
@@ -566,7 +578,7 @@ const mapOption = computed(() => {
                 <path d="M4 16v3a1.5 1.5 0 0 0 1.5 1.5h13A1.5 1.5 0 0 0 20 19v-3" />
               </svg>
             </div>
-            <p>拖入 access.log 到此处</p>
+            <p>{{ dbLoading ? 'IP 数据库加载中…' : '拖入 access.log 到此处' }}</p>
           </template>
           <p v-else class="file">{{ fileName }}</p>
           <button class="btn ghost" @click="fileInput?.click()">
@@ -581,6 +593,7 @@ const mapOption = computed(() => {
         </div>
 
         <div v-if="dbError" class="hint err">数据库加载失败: {{ dbError }}</div>
+        <div v-else-if="runError" class="hint err">分析出错: {{ runError }}</div>
       </section>
 
       <section v-if="result" class="panel stats">
@@ -844,6 +857,12 @@ input {
 }
 .drop {
   transition: border-color 0.15s, background 0.15s, transform 0.15s, box-shadow 0.15s;
+}
+.drop.disabled {
+  opacity: 0.55;
+}
+.drop.disabled .btn.ghost {
+  opacity: 0.5;
 }
 .drop-icon {
   color: #5d6b85;
