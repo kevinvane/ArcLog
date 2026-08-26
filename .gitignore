@@ -1,4 +1,4 @@
-# 依赖
+﻿# 依赖
 node_modules/
 
 # 构建产物
@@ -10,8 +10,6 @@ dist-ssr/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-preview.log
-preview.err
 
 # 本地环境
 .env
