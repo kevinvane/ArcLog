@@ -8,6 +8,7 @@ export interface LogLine {
   method?: string
   ts?: number // epoch ms
   ua?: string // User-Agent 原文
+  referer?: string
 }
 
 // 标准 combined 格式:
@@ -21,7 +22,7 @@ const MONTHS: Record<string, number> = {
 }
 
 // 解析 nginx time_local: "25/Aug/2026:14:32:10 +0800"
-function parseNginxTime(s: string | undefined): number | undefined {
+export function parseNginxTime(s: string | undefined): number | undefined {
   if (!s || s.length < 20) return undefined
   const day = +s.slice(0, 2)
   const mon = MONTHS[s.slice(3, 6)]

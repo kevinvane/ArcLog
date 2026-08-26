@@ -4,6 +4,7 @@ import VChart from 'vue-echarts'
 import { serverCoord, type AnalyzeResult } from './utils/analyze'
 import { SERVER_REGIONS } from './utils/geo'
 import type { CityStat } from './utils/analyze'
+import { compileFormat, extractFormat } from './utils/formatCompiler'
 import {
   ACCENTS,
   applyThemeVars,
@@ -41,6 +42,7 @@ function toggleMode() {
 watch(activeTheme, (t) => applyThemeVars(t), { immediate: true })
 const result = ref<AnalyzeResult | null>(null)
 const fileName = ref('')
+const lastRawText = ref('') // 保留原始日志, 切换自定义格式时可重新解析
 const analyzing = ref(false)
 const dragOver = ref(false)
 const fileInput = ref<HTMLInputElement>()
@@ -67,6 +69,17 @@ function onWorkerMessage(e: MessageEvent) {
       break
     case 'progress':
       parseProgress.value = msg.total ? Math.round((msg.done / msg.total) * 100) : null
+      break
+    case 'validateResult':
+      fmtStatus.value = {
+        kind: msg.error ? 'err' : msg.total === 0 ? 'ok' : msg.matched / msg.total >= 0.95 ? 'ok' : msg.matched / msg.total >= 0.5 ? 'warn' : 'err',
+        text: msg.error
+          ? msg.message || msg.error
+          : msg.total === 0
+            ? '格式编译通过，载入日志后将自动应用'
+            : `匹配率 ${Math.round((msg.matched / msg.total) * 100)}%（${msg.matched}/${msg.total} 行）`,
+        preview: msg.preview
+      }
       break
     case 'result':
       result.value = msg.result
@@ -146,6 +159,7 @@ function genSample(): string {
 
 function runAnalyze(text: string) {
   if (!worker || dbLoading.value || dbError.value) return
+  lastRawText.value = text
   analyzing.value = true
   worker.postMessage({
     type: 'analyze',
@@ -154,8 +168,13 @@ function runAnalyze(text: string) {
       status: statusFilter.value,
       province: provinceFilter.value,
       isp: ispFilter.value
-    }
+    },
+    format: savedFormat()
   })
+}
+
+function reparse() {
+  if (lastRawText.value) runAnalyze(lastRawText.value)
 }
 
 // ---------- 过滤联动 ----------
@@ -192,9 +211,50 @@ function clearFilters() {
   provinceFilter.value = null
   ispFilter.value = null
 }
+
 const hasFilter = computed(
   () => !!(statusFilter.value || provinceFilter.value || ispFilter.value)
 )
+
+// ---------- 自定义日志格式 ----------
+const FMT_KEY = 'arclog-logformat'
+const fmtOpen = ref(false)
+const fmtInput = ref(localStorage.getItem(FMT_KEY) || '')
+const fmtStatus = ref<{ kind: 'idle' | 'ok' | 'warn' | 'err'; text: string; preview?: Record<string, string> }>({
+  kind: 'idle',
+  text: ''
+})
+const hasCustomFormat = computed(() => !!localStorage.getItem(FMT_KEY))
+const savedFormat = () => localStorage.getItem(FMT_KEY) || undefined
+
+function validateFormat() {
+  if (!worker) return
+  fmtStatus.value = { kind: 'idle', text: '校验中…' }
+  worker.postMessage({ type: 'validateFormat', format: fmtInput.value })
+}
+
+function applyFormat() {
+  try {
+    if (fmtInput.value.trim()) {
+      // 应用前先本地编译一次, 编译失败直接提示
+      compileFormat(extractFormat(fmtInput.value))
+      localStorage.setItem(FMT_KEY, fmtInput.value)
+    } else {
+      localStorage.removeItem(FMT_KEY)
+    }
+    fmtStatus.value = { kind: 'ok', text: '已应用，正在用新格式重新解析…' }
+    reparse()
+  } catch (e) {
+    fmtStatus.value = { kind: 'err', text: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+function resetFormat() {
+  localStorage.removeItem(FMT_KEY)
+  fmtInput.value = ''
+  fmtStatus.value = { kind: 'ok', text: '已恢复默认 combined 格式' }
+  reparse()
+}
 
 // ---------- 时间轴回放 ----------
 const playIndex = ref<number | null>(null) // null = 总览
@@ -749,6 +809,30 @@ const mapOption = computed(() => {
           <button class="btn primary" :disabled="dbLoading || !!dbError" @click="onSample">
             {{ dbLoading ? '数据库加载中…' : '载入示例数据' }}
           </button>
+          <button class="fmt-toggle" @click="fmtOpen = !fmtOpen">
+            {{ fmtOpen ? '▾' : '▸' }} 自定义日志格式
+            <span v-if="hasCustomFormat" class="fmt-dot" title="已启用自定义格式"></span>
+          </button>
+          <div v-if="fmtOpen" class="fmt-panel">
+            <textarea
+              v-model="fmtInput"
+              class="fmt-input"
+              rows="4"
+              spellcheck="false"
+              placeholder="粘贴 nginx log_format 配置或格式串, 例如:&#10;log_format main '$remote_addr - [$time_local] &quot;$request&quot; $status $body_bytes_sent;'"
+            ></textarea>
+            <div v-if="fmtStatus.text" class="fmt-status" :class="fmtStatus.kind">
+              {{ fmtStatus.text }}
+              <div v-if="fmtStatus.preview" class="fmt-preview">
+                <div v-for="(v, k) in fmtStatus.preview" :key="k">{{ k }} = {{ v }}</div>
+              </div>
+            </div>
+            <div class="fmt-actions">
+              <button class="btn primary small" @click="applyFormat">应用</button>
+              <button class="btn ghost small" @click="validateFormat">校验</button>
+              <button class="btn ghost small" @click="resetFormat">恢复默认</button>
+            </div>
+          </div>
         </div>
 
         <div v-if="dbError" class="hint err">数据库加载失败: {{ dbError }}</div>
@@ -1100,6 +1184,68 @@ input {
 
 .actions {
   margin-top: 12px;
+}
+.fmt-toggle {
+  width: 100%;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--dim);
+  text-align: left;
+  padding: 6px 4px;
+  border-radius: 6px;
+}
+.fmt-toggle:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+.fmt-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  margin-left: 5px;
+}
+.fmt-panel {
+  margin-top: 8px;
+  padding: 10px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.fmt-input {
+  width: 100%;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 11px;
+  resize: vertical;
+  line-height: 1.5;
+}
+.fmt-status {
+  margin-top: 8px;
+  font-size: 11px;
+  line-height: 1.6;
+}
+.fmt-status.ok { color: #4ade80; }
+.fmt-status.warn { color: #fbbf24; }
+.fmt-status.err { color: #ff6b6b; }
+.fmt-preview {
+  margin-top: 4px;
+  padding: 6px 8px;
+  background: var(--panel);
+  border-radius: 6px;
+  font-family: ui-monospace, Consolas, monospace;
+  color: var(--dim);
+  word-break: break-all;
+}
+.fmt-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+}
+.btn.small {
+  flex: 1;
+  padding: 6px 0;
+  font-size: 12px;
 }
 
 .btn {
