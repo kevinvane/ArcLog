@@ -4,6 +4,7 @@ import VChart from 'vue-echarts'
 import { serverCoord, type AnalyzeResult } from './utils/analyze'
 import { SERVER_REGIONS } from './utils/geo'
 import type { CityStat } from './utils/analyze'
+import { THEMES, applyThemeVars, defaultThemeId, findTheme, saveThemeId } from './theme'
 
 const DB_URL = '/data/ip2region.xdb'
 
@@ -15,6 +16,15 @@ const selectedRegion = ref('华东1（杭州）')
 const serverLoc = computed(
   () => SERVER_REGIONS.find((r) => r.label === selectedRegion.value)?.city ?? '杭州'
 )
+
+// ---------- 主题 ----------
+const themeId = ref(defaultThemeId())
+const activeTheme = computed(() => findTheme(themeId.value))
+function setTheme(id: string) {
+  themeId.value = id
+  saveThemeId(id)
+}
+watch(activeTheme, (t) => applyThemeVars(t), { immediate: true })
 const result = ref<AnalyzeResult | null>(null)
 const fileName = ref('')
 const analyzing = ref(false)
@@ -269,7 +279,11 @@ function triggerDownload(href: string, name: string) {
 function exportPng() {
   const inst = chartComp.value?.chart
   if (!inst) return
-  const url = inst.getDataURL({ type: 'png', pixelRatio: 2, backgroundColor: '#0a0e17' })
+  const url = inst.getDataURL({
+    type: 'png',
+    pixelRatio: 2,
+    backgroundColor: activeTheme.value.css['--bg']
+  })
   triggerDownload(url, `arclog-${new Date().toISOString().slice(0, 10)}.png`)
 }
 
@@ -318,7 +332,11 @@ function exportHtml() {
   if (!r) return
   const inst = chartComp.value?.chart
   const png = inst
-    ? inst.getDataURL({ type: 'png', pixelRatio: 2, backgroundColor: '#0a0e17' })
+    ? inst.getDataURL({
+        type: 'png',
+        pixelRatio: 2,
+        backgroundColor: activeTheme.value.css['--bg']
+      })
     : ''
   const esc = (s: unknown) =>
     String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!)
@@ -475,13 +493,17 @@ const mapOption = computed(() => {
   const n = origins.length
   const LEVEL_WIDTH = [9, 6.5, 4.5, 3, 1.6]
   const LEVEL_BLUR = [16, 12, 9, 6, 3]
-  // 白 -> 红 梯度: t=1 最红(量大), t=0 近白(量小)
-  const mixWhiteRed = (t: number) =>
-    `rgb(230, ${Math.round(255 - t * 225)}, ${Math.round(255 - t * 205)})`
-  const LEVEL_COLOR = Array.from({ length: K }, (_, i) => mixWhiteRed(1 - i / (K - 1)))
-  const LEVEL_SHADOW = Array.from({ length: K }, (_, i) =>
-    `rgba(230, ${Math.round(60 + (i / (K - 1)) * 195)}, ${Math.round(50 + (i / (K - 1)) * 205)}, 0.6)`
-  )
+  // 飞线渐变由主题决定: t=0 浅色(量小) -> t=1 深色(量大)
+  const ch = activeTheme.value.chart
+  const mixLine = (t: number) =>
+    `rgb(${ch.lineFrom.map((v, i) => Math.round(v + (ch.lineTo[i] - v) * t)).join(',')})`
+  const LEVEL_COLOR = Array.from({ length: K }, (_, i) => mixLine(1 - i / (K - 1)))
+  const LEVEL_SHADOW = Array.from({ length: K }, (_, i) => {
+    const rgb = ch.lineFrom.map((v, j) =>
+      Math.round(v + (ch.lineTo[j] - v) * (1 - i / (K - 1)))
+    )
+    return `rgba(${rgb.join(',')}, 0.6)`
+  })
 
   const linesData = origins.flatMap((p, i) => {
     const level = Math.min(K - 1, Math.floor((i / n) * K))
@@ -516,15 +538,15 @@ const mapOption = computed(() => {
       text: 'ArcLog · 访问来源飞线图',
       left: 'center',
       top: 14,
-      textStyle: { color: '#c7d2e4', fontSize: 15, fontWeight: 600, letterSpacing: 1 }
+      textStyle: { color: activeTheme.value.css['--dim'], fontSize: 15, fontWeight: 600, letterSpacing: 1 }
     },
     tooltip: {
       trigger: 'item',
-      backgroundColor: 'rgba(13, 18, 30, 0.92)',
-      borderColor: 'rgba(255, 255, 255, 0.12)',
+      backgroundColor: ch.tipBg,
+      borderColor: ch.tipBorder,
       borderWidth: 1,
       padding: [8, 12],
-      textStyle: { color: '#e8edf5', fontSize: 12 },
+      textStyle: { color: ch.tipText, fontSize: 12 },
       extraCssText:
         'border-radius:10px; box-shadow:0 8px 24px rgba(0,0,0,.45); backdrop-filter:blur(4px);',
       formatter: (p: any) => {
@@ -543,11 +565,11 @@ const mapOption = computed(() => {
       scaleLimit: { min: 1, max: 8 },
       label: { show: false },
       itemStyle: {
-        areaColor: '#1b2436',
-        borderColor: '#3a4a66'
+        areaColor: ch.mapArea,
+        borderColor: ch.mapBorder
       },
       emphasis: {
-        itemStyle: { areaColor: '#2a3a55' },
+        itemStyle: { areaColor: ch.mapHover },
         label: { show: false }
       }
     },
@@ -584,7 +606,7 @@ const mapOption = computed(() => {
         rippleEffect: { brushType: 'stroke' },
         symbolSize: (val: number[]) => Math.max(5, Math.sqrt(val[2] / localMax) * 32),
         itemStyle: {
-          color: (params: any) => (params.data && params.data.alert ? '#c084fc' : '#ff7a45')
+          color: (params: any) => (params.data && params.data.alert ? ch.alert : ch.point)
         },
         data: pointsData
       },
@@ -595,8 +617,8 @@ const mapOption = computed(() => {
         zlevel: 4,
         symbol: 'pin',
         symbolSize: 34,
-        itemStyle: { color: '#00e676' },
-        label: { show: true, formatter: '服务器', position: 'top', color: '#fff', fontSize: 11 },
+        itemStyle: { color: ch.server },
+        label: { show: true, formatter: '服务器', position: 'top', color: ch.tipText, fontSize: 11 },
         data: [{ name: '服务器', value: [...server, 0] }]
       }
     ]
@@ -633,6 +655,21 @@ const mapOption = computed(() => {
       </header>
 
       <section class="panel">
+        <div class="field">
+          <label>主题</label>
+          <div class="themes">
+            <button
+              v-for="t in THEMES"
+              :key="t.id"
+              class="swatch"
+              :class="{ on: themeId === t.id }"
+              :style="{ background: `linear-gradient(135deg, ${t.css['--accent']}, ${t.css['--accent-2']})` }"
+              :title="t.label"
+              @click="setTheme(t.id)"
+            ></button>
+          </div>
+        </div>
+
         <div class="field">
           <label>服务器位置</label>
           <select v-model="selectedRegion">
@@ -822,7 +859,10 @@ const mapOption = computed(() => {
       <div v-if="result" class="legend">
         <span class="lg-title">访问量</span>
         <span class="lg-end">少</span>
-        <i class="lg-bar"></i>
+        <i
+          class="lg-bar"
+          :style="{ background: `linear-gradient(90deg, rgb(${activeTheme.chart.lineFrom}), rgb(${activeTheme.chart.lineTo}))` }"
+        ></i>
         <span class="lg-end">多</span>
       </div>
       <div v-if="result?.timeline" class="timeline">
@@ -850,17 +890,17 @@ const mapOption = computed(() => {
   display: flex;
   height: 100vh;
   background:
-    radial-gradient(1200px 600px at 70% 40%, rgba(230, 45, 60, 0.05), transparent 60%),
-    #0a0e17;
+    radial-gradient(1200px 600px at 70% 40%, var(--glow), transparent 60%),
+    var(--bg);
 }
 
 /* ---------- 侧栏 ---------- */
 .sidebar {
   width: 340px;
   padding: 20px 18px;
-  border-right: 1px solid rgba(255, 255, 255, 0.06);
+  border-right: 1px solid var(--border);
   overflow-y: auto;
-  background: rgba(12, 17, 28, 0.9);
+  background: var(--float-bg);
   backdrop-filter: blur(6px);
 }
 .brand {
@@ -876,8 +916,8 @@ const mapOption = computed(() => {
   display: grid;
   place-items: center;
   color: #fff;
-  background: linear-gradient(135deg, #ff4d5e, #b3123f);
-  box-shadow: 0 4px 14px rgba(255, 77, 94, 0.35);
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  box-shadow: 0 4px 14px var(--accent-soft);
 }
 .brand h1 {
   font-size: 16px;
@@ -887,11 +927,11 @@ const mapOption = computed(() => {
 .brand p {
   margin: 2px 0 0;
   font-size: 11px;
-  color: #77839b;
+  color: var(--dim);
 }
 .gh-link {
   margin-left: auto;
-  color: #77839b;
+  color: var(--dim);
   display: grid;
   place-items: center;
   width: 30px;
@@ -900,13 +940,13 @@ const mapOption = computed(() => {
   transition: color 0.15s, background 0.15s;
 }
 .gh-link:hover {
-  color: #fff;
-  background: rgba(255, 255, 255, 0.08);
+  color: var(--strong);
+  background: var(--hover);
 }
 
 .panel {
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: var(--panel);
+  border: 1px solid var(--border);
   border-radius: 12px;
   padding: 14px;
   margin-bottom: 14px;
@@ -928,15 +968,33 @@ const mapOption = computed(() => {
 .field label {
   display: block;
   font-size: 11px;
-  color: #8b97ad;
+  color: var(--dim);
   margin-bottom: 6px;
   letter-spacing: 0.3px;
 }
+.themes {
+  display: flex;
+  gap: 8px;
+}
+.swatch {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  transition: transform 0.12s, box-shadow 0.12s;
+}
+.swatch:hover:not(.on) {
+  transform: scale(1.1);
+}
+.swatch.on {
+  box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+}
+
 .seg {
   display: flex;
   gap: 4px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: var(--panel-2);
+  border: 1px solid var(--border);
   padding: 3px;
   border-radius: 8px;
 }
@@ -945,16 +1003,16 @@ const mapOption = computed(() => {
   border-radius: 6px;
   padding: 5px 0;
   font-size: 12px;
-  color: #93a1ba;
+  color: var(--dim);
   transition: background 0.15s, color 0.15s;
 }
 .seg button:hover:not(.on) {
-  background: rgba(255, 255, 255, 0.06);
-  color: #e8edf5;
+  background: var(--hover);
+  color: var(--text);
 }
 .seg button.on {
   color: #fff;
-  background: linear-gradient(135deg, #ff4d5e, #c9184a);
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
 }
 
 input {
@@ -962,20 +1020,17 @@ input {
 }
 
 .drop {
-  border: 1px dashed rgba(255, 255, 255, 0.15);
+  border: 1px dashed var(--border-2);
   border-radius: 10px;
   padding: 20px 14px 16px;
   text-align: center;
-  transition: border-color 0.15s, background 0.15s;
+  transition: border-color 0.15s, background 0.15s, transform 0.15s, box-shadow 0.15s;
 }
 .drop.over {
-  border-color: #ff4d5e;
-  background: rgba(255, 77, 94, 0.08);
+  border-color: var(--accent);
+  background: var(--accent-soft);
   transform: scale(1.02);
-  box-shadow: 0 0 0 4px rgba(255, 77, 94, 0.12);
-}
-.drop {
-  transition: border-color 0.15s, background 0.15s, transform 0.15s, box-shadow 0.15s;
+  box-shadow: 0 0 0 4px var(--accent-soft);
 }
 .drop.disabled {
   opacity: 0.55;
@@ -984,16 +1039,16 @@ input {
   opacity: 0.5;
 }
 .drop-icon {
-  color: #5d6b85;
+  color: var(--muted);
   margin-bottom: 8px;
 }
 .drop p {
   margin: 0 0 12px;
   font-size: 13px;
-  color: #8b97ad;
+  color: var(--dim);
 }
 .drop .file {
-  color: #e8edf5;
+  color: var(--text);
   word-break: break-all;
   font-size: 12px;
 }
@@ -1012,20 +1067,20 @@ input {
 .btn.primary {
   width: 100%;
   color: #fff;
-  background: linear-gradient(135deg, #ff4d5e, #c9184a);
-  box-shadow: 0 4px 14px rgba(255, 77, 94, 0.3);
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  box-shadow: 0 4px 14px var(--accent-soft);
 }
 .btn.primary:hover:not(:disabled) {
   transform: translateY(-1px);
-  box-shadow: 0 6px 18px rgba(255, 77, 94, 0.4);
+  box-shadow: 0 6px 18px var(--accent-soft);
 }
 .btn.ghost {
   background: transparent;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  color: #cdd6e4;
+  border: 1px solid var(--border-2);
+  color: var(--text);
 }
 .btn.ghost:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--hover);
 }
 .btn:disabled {
   opacity: 0.45;
@@ -1046,8 +1101,8 @@ input {
   margin-bottom: 16px;
 }
 .stat {
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.05);
+  background: var(--panel-2);
+  border: 1px solid var(--border);
   border-radius: 10px;
   padding: 10px 8px;
   text-align: center;
@@ -1056,14 +1111,14 @@ input {
   display: block;
   font-size: 19px;
   font-variant-numeric: tabular-nums;
-  color: #ff6675;
+  color: var(--accent);
 }
 .stat b.warn {
   color: #ffb020;
 }
 .stat span {
   font-size: 11px;
-  color: #77839b;
+  color: var(--dim);
 }
 
 h3 {
@@ -1072,7 +1127,7 @@ h3 {
   letter-spacing: 0.8px;
   text-transform: uppercase;
   margin: 4px 0 10px;
-  color: #93a1ba;
+  color: var(--dim);
 }
 
 .list {
@@ -1088,16 +1143,16 @@ h3 {
   gap: 8px;
   padding: 5px 4px;
   margin: 0 -4px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid var(--border);
   border-radius: 6px;
   transition: background 0.15s;
 }
 .list li:hover,
 .list li.active {
-  background: rgba(255, 77, 94, 0.12);
+  background: var(--accent-soft);
 }
 .list li.active .name {
-  color: #fff;
+  color: var(--strong);
 }
 .list li.active .bar > i {
   filter: brightness(1.2);
@@ -1117,8 +1172,8 @@ h3 {
   grid-template-columns: 64px 1fr 58px;
 }
 .list li.sel {
-  background: rgba(255, 77, 94, 0.16);
-  box-shadow: inset 2px 0 0 #ff4d5e;
+  background: var(--accent-soft);
+  box-shadow: inset 2px 0 0 var(--accent);
 }
 .chip {
   transition: opacity 0.15s, transform 0.12s;
@@ -1137,31 +1192,31 @@ h3 {
   gap: 6px;
   margin-bottom: 12px;
   padding-bottom: 10px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid var(--border);
 }
 .f-chip {
   padding: 3px 8px;
   border-radius: 6px;
   font-size: 11px;
-  color: #ffb3bb;
-  background: rgba(255, 77, 94, 0.15);
-  border: 1px solid rgba(255, 77, 94, 0.35);
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
   cursor: pointer;
 }
 .f-chip:hover {
-  background: rgba(255, 77, 94, 0.28);
+  filter: brightness(1.15);
 }
 .f-clear {
   margin-left: auto;
   font-size: 11px;
-  color: #93a1ba;
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: var(--dim);
+  border: 1px solid var(--border-2);
   border-radius: 6px;
   padding: 3px 8px;
 }
 .f-clear:hover {
-  color: #fff;
-  background: rgba(255, 255, 255, 0.08);
+  color: var(--strong);
+  background: var(--hover);
 }
 .path {
   overflow: hidden;
@@ -1171,7 +1226,7 @@ h3 {
   text-align: left;
   font-family: ui-monospace, Consolas, monospace;
   font-size: 11px;
-  color: #c3cee0;
+  color: var(--text);
 }
 .rank {
   width: 20px;
@@ -1180,14 +1235,14 @@ h3 {
   place-items: center;
   border-radius: 6px;
   font-size: 11px;
-  color: #77839b;
-  background: rgba(255, 255, 255, 0.05);
+  color: var(--dim);
+  background: var(--panel-2);
 }
-.rank.r1 { color: #fff; background: linear-gradient(135deg, #ff4d5e, #c9184a); }
-.rank.r2 { color: #ffd9dc; background: rgba(255, 77, 94, 0.55); }
-.rank.r3 { color: #ffd9dc; background: rgba(255, 77, 94, 0.3); }
+.rank.r1 { color: #fff; background: linear-gradient(135deg, var(--accent), var(--accent-2)); }
+.rank.r2 { background: var(--accent); }
+.rank.r3 { background: var(--accent-soft); }
 .name {
-  color: #dfe6f1;
+  color: var(--text);
 }
 .warn-badge {
   margin-left: 4px;
@@ -1205,32 +1260,32 @@ h3 {
 }
 .suspects .ip {
   font-family: ui-monospace, Consolas, monospace;
-  color: #fda4af;
+  color: #fb7185;
   font-size: 11px;
 }
 .suspects .meta {
   flex-shrink: 0;
-  color: #77839b;
+  color: var(--dim);
   font-size: 11px;
 }
 .bar {
   position: relative;
   height: 4px;
   border-radius: 2px;
-  background: rgba(255, 255, 255, 0.07);
+  background: var(--bar-track);
   overflow: hidden;
 }
 .bar i {
   position: absolute;
   inset: 0 auto 0 0;
   border-radius: 2px;
-  background: linear-gradient(90deg, #ffb199, #ff4d5e);
+  background: linear-gradient(90deg, var(--dim), var(--accent));
   transition: width 0.4s ease;
 }
 .num {
   text-align: right;
   font-variant-numeric: tabular-nums;
-  color: #aab6cb;
+  color: var(--dim);
 }
 
 .chip {
@@ -1268,19 +1323,24 @@ h3 {
   align-items: center;
   justify-content: center;
   gap: 10px;
-  color: #4d5a72;
+  color: var(--muted);
 }
 .placeholder .sub {
   font-size: 12px;
+}
+.tips,
+.map-tools .tool-btn,
+.timeline,
+.legend {
+  background: var(--float-bg);
+  border: 1px solid var(--border);
 }
 .tips {
   position: absolute;
   left: 14px;
   bottom: 12px;
   font-size: 11px;
-  color: #5d6b85;
-  background: rgba(12, 17, 28, 0.7);
-  border: 1px solid rgba(255, 255, 255, 0.07);
+  color: var(--muted);
   padding: 5px 10px;
   border-radius: 8px;
   pointer-events: none;
@@ -1300,8 +1360,6 @@ h3 {
   display: flex;
   align-items: center;
   gap: 10px;
-  background: rgba(12, 17, 28, 0.7);
-  border: 1px solid rgba(255, 255, 255, 0.07);
   padding: 6px 14px;
   border-radius: 8px;
 }
@@ -1313,36 +1371,34 @@ h3 {
   font-size: 11px;
   display: grid;
   place-items: center;
-  background: linear-gradient(135deg, #ff4d5e, #c9184a);
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
 }
 .t-slider {
   width: 220px;
   padding: 0;
   border: none;
   background: transparent;
-  accent-color: #ff4d5e;
+  accent-color: var(--accent);
   cursor: pointer;
 }
 .t-label {
   font-size: 11px;
-  color: #aab6cb;
+  color: var(--text);
   font-variant-numeric: tabular-nums;
   min-width: 96px;
   text-align: center;
 }
 .tool-btn {
   font-size: 12px;
-  color: #cdd6e4;
-  background: rgba(12, 17, 28, 0.7);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--text);
   border-radius: 8px;
   padding: 6px 12px;
   transition: background 0.15s, color 0.15s, border-color 0.15s;
 }
 .tool-btn:hover {
   color: #fff;
-  background: rgba(255, 77, 94, 0.18);
-  border-color: rgba(255, 77, 94, 0.45);
+  background: var(--accent);
+  border-color: var(--accent);
 }
 .legend {
   position: absolute;
@@ -1352,42 +1408,39 @@ h3 {
   align-items: center;
   gap: 8px;
   font-size: 11px;
-  color: #8b97ad;
-  background: rgba(12, 17, 28, 0.7);
-  border: 1px solid rgba(255, 255, 255, 0.07);
+  color: var(--dim);
   padding: 6px 12px;
   border-radius: 8px;
   pointer-events: none;
 }
 .lg-title {
-  color: #aab6cb;
+  color: var(--text);
   margin-right: 2px;
 }
 .lg-bar {
   width: 90px;
   height: 6px;
   border-radius: 3px;
-  background: linear-gradient(90deg, rgb(230, 255, 250), rgb(230, 30, 50));
-  box-shadow: 0 0 8px rgba(230, 45, 60, 0.35);
+  box-shadow: 0 0 8px var(--accent-soft);
 }
 .overlay {
   position: absolute;
   inset: 0;
-  background: rgba(10, 14, 23, 0.65);
+  background: var(--overlay);
   backdrop-filter: blur(2px);
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 10px;
   font-size: 15px;
-  color: #e8edf5;
+  color: var(--text);
 }
 .spin {
   width: 16px;
   height: 16px;
   border-radius: 50%;
-  border: 2px solid rgba(255, 255, 255, 0.2);
-  border-top-color: #ff4d5e;
+  border: 2px solid var(--border-2);
+  border-top-color: var(--accent);
   animation: rotate 0.8s linear infinite;
 }
 @keyframes rotate {
@@ -1399,10 +1452,10 @@ h3 {
   width: 8px;
 }
 .sidebar::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--border-2);
   border-radius: 4px;
 }
 .sidebar::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.18);
+  background: var(--dim);
 }
 </style>

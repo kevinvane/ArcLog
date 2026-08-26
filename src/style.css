@@ -15,12 +15,13 @@ body,
   margin: 0;
   padding: 0;
   height: 100%;
-  background: #0a0e17;
-  color: #e8edf5;
+  background: var(--bg);
+  color: var(--text);
+  transition: background 0.25s, color 0.25s;
 }
 
 ::selection {
-  background: rgba(255, 77, 94, 0.35);
+  background: var(--accent-soft);
 }
 
 button {
@@ -33,9 +34,9 @@ button {
 
 input,
 select {
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  color: #e8edf5;
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  color: var(--text);
   border-radius: 8px;
   padding: 8px 10px;
   font-size: 13px;
@@ -46,25 +47,25 @@ select {
 
 input:hover,
 select:hover {
-  border-color: rgba(255, 255, 255, 0.2);
+  border-color: var(--border-2);
 }
 
 input:focus,
 select:focus {
-  border-color: #ff4d5e;
-  background: rgba(255, 77, 94, 0.05);
+  border-color: var(--accent);
+  background: var(--input-bg);
 }
 
 input::placeholder {
-  color: #55627a;
+  color: var(--muted);
 }
 
 select {
   width: 100%;
   cursor: pointer;
   appearance: none;
-  background-image: linear-gradient(45deg, transparent 50%, #77839b 50%),
-    linear-gradient(135deg, #77839b 50%, transparent 50%);
+  background-image: linear-gradient(45deg, transparent 50%, var(--dim) 50%),
+    linear-gradient(135deg, var(--dim) 50%, transparent 50%);
   background-position:
     calc(100% - 16px) 55%,
     calc(100% - 11px) 55%;
@@ -73,6 +74,6 @@ select {
 }
 
 select option {
-  background: #111827;
-  color: #e8edf5;
+  background: var(--bg);
+  color: var(--text);
 }
