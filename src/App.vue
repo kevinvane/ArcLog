@@ -4,7 +4,16 @@ import VChart from 'vue-echarts'
 import { serverCoord, type AnalyzeResult } from './utils/analyze'
 import { SERVER_REGIONS } from './utils/geo'
 import type { CityStat } from './utils/analyze'
-import { THEMES, applyThemeVars, defaultThemeId, findTheme, saveThemeId } from './theme'
+import {
+  ACCENTS,
+  applyThemeVars,
+  findAccent,
+  resolveTheme,
+  savedAccentId,
+  savedMode,
+  saveAppearance,
+  type ModeId
+} from './theme'
 
 const DB_URL = '/data/ip2region.xdb'
 
@@ -17,12 +26,17 @@ const serverLoc = computed(
   () => SERVER_REGIONS.find((r) => r.label === selectedRegion.value)?.city ?? '杭州'
 )
 
-// ---------- 主题 ----------
-const themeId = ref(defaultThemeId())
-const activeTheme = computed(() => findTheme(themeId.value))
-function setTheme(id: string) {
-  themeId.value = id
-  saveThemeId(id)
+// ---------- 主题: 强调色 × 昼夜模式 ----------
+const accentId = ref(savedAccentId())
+const mode = ref<ModeId>(savedMode())
+const activeTheme = computed(() => resolveTheme(accentId.value, mode.value))
+function setAccent(id: string) {
+  accentId.value = id
+  saveAppearance(accentId.value, mode.value)
+}
+function toggleMode() {
+  mode.value = mode.value === 'dark' ? 'light' : 'dark'
+  saveAppearance(accentId.value, mode.value)
 }
 watch(activeTheme, (t) => applyThemeVars(t), { immediate: true })
 const result = ref<AnalyzeResult | null>(null)
@@ -656,17 +670,32 @@ const mapOption = computed(() => {
 
       <section class="panel">
         <div class="field">
-          <label>主题</label>
+          <label>主题色</label>
           <div class="themes">
             <button
-              v-for="t in THEMES"
-              :key="t.id"
+              v-for="a in ACCENTS"
+              :key="a.id"
               class="swatch"
-              :class="{ on: themeId === t.id }"
-              :style="{ background: `linear-gradient(135deg, ${t.css['--accent']}, ${t.css['--accent-2']})` }"
-              :title="t.label"
-              @click="setTheme(t.id)"
+              :class="{ on: accentId === a.id }"
+              :style="{ background: `linear-gradient(135deg, ${a.accent}, ${a.accent2})` }"
+              :title="a.label"
+              @click="setAccent(a.id)"
             ></button>
+            <button
+              class="mode-btn"
+              :title="mode === 'dark' ? '切换日间模式' : '切换夜间模式'"
+              @click="toggleMode"
+            >
+              <!-- 太阳: 当前为夜间, 点击切日间 -->
+              <svg v-if="mode === 'dark'" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                <circle cx="12" cy="12" r="4.5" />
+                <path d="M12 2v2m0 16v2M4.9 4.9l1.4 1.4m11.3 11.3 1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4m11.3-11.3 1.4-1.4" />
+              </svg>
+              <!-- 月亮: 当前为日间, 点击切夜间 -->
+              <svg v-else viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" />
+              </svg>
+            </button>
           </div>
         </div>
 
@@ -988,6 +1017,22 @@ const mapOption = computed(() => {
 }
 .swatch.on {
   box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+}
+.mode-btn {
+  margin-left: auto;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: var(--dim);
+  background: var(--panel-2);
+  border: 1px solid var(--border-2);
+  transition: color 0.15s, transform 0.12s, border-color 0.15s;
+}
+.mode-btn:hover {
+  color: var(--text);
+  transform: rotate(15deg);
 }
 
 .seg {
