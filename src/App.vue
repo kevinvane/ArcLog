@@ -262,7 +262,7 @@ function exportPng() {
   const inst = chartComp.value?.chart
   if (!inst) return
   const url = inst.getDataURL({ type: 'png', pixelRatio: 2, backgroundColor: '#0a0e17' })
-  triggerDownload(url, `nginx-ip-map-${new Date().toISOString().slice(0, 10)}.png`)
+  triggerDownload(url, `arclog-${new Date().toISOString().slice(0, 10)}.png`)
 }
 
 function exportCsv() {
@@ -431,7 +431,7 @@ const mapOption = computed(() => {
   return {
     backgroundColor: 'transparent',
     title: {
-      text: 'Nginx 访问 IP 来源 · 飞线图',
+      text: 'ArcLog · 访问来源飞线图',
       left: 'center',
       top: 14,
       textStyle: { color: '#c7d2e4', fontSize: 15, fontWeight: 600, letterSpacing: 1 }
@@ -534,8 +534,8 @@ const mapOption = computed(() => {
           </svg>
         </div>
         <div>
-          <h1>IP 来源分析</h1>
-          <p>Nginx 日志 · 飞线可视化</p>
+          <h1>ArcLog · 访迹</h1>
+          <p>Nginx 访问来源 · 飞线可视化</p>
         </div>
       </header>
 

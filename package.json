@@ -1,8 +1,10 @@
 {
-  "name": "nginx-ip-map",
+  "name": "arclog",
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "description": "本地分析 nginx 日志, 在 2D 中国地图上以飞线展示访问 IP 来源",
+  "license": "MIT",
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc -b && vite build",

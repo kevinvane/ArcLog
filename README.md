@@ -1,6 +1,8 @@
-# Nginx 访问 IP 来源分析
+# ArcLog · 访迹
 
 本地分析 nginx 日志、在 2D 中国地图上以**飞线**展示访问来源的可视化工具。纯前端实现，零后端、零外部请求，数据不出本机。
+
+> **ArcLog** = Access **Log** + **Arc**（飞线弧线）—— 看你的访客从哪里来，如何"飞"到你的服务器。
 
 
 ## 预览
@@ -98,6 +100,12 @@ access.log
 - **海外 IP**：不计入飞线（中国地图无对应坐标），在侧栏「海外/未知归属」卡片中计数
 - **隐私**：所有解析在本机浏览器完成，不上传任何数据
 - **浏览器要求**：需支持 ES Module Worker（Chrome 80+ / Edge 80+ / Firefox 114+ / Safari 15+）
+- **数据库时效**：IP 库随仓库提供，数据会随时间老化；可从 [ip2region 官方仓库](https://github.com/lionsoul2014/ip2region/releases) 下载最新 `ip2region_v4.xdb` 覆盖 `public/data/ip2region.xdb`
+
+## 相关文档
+
+- [技术方案总结](docs/方案总结.md)
+- [优化路线图](docs/优化路线图.md)
 
 ## 已知限制
 
