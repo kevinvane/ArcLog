@@ -15,6 +15,7 @@ import {
   saveAppearance,
   type ModeId
 } from './theme'
+import { gunzipSync } from 'fflate'
 
 const DB_URL = '/data/ip2region.xdb'
 
@@ -311,6 +312,15 @@ const timeLabel = computed(() => {
   return fmtBucket(tl.buckets[playIndex.value], tl.granularity)
 })
 
+async function readFileAsText(file: File): Promise<string> {
+  if (file.name.endsWith('.gz')) {
+    const buffer = await file.arrayBuffer()
+    const decompressed = gunzipSync(new Uint8Array(buffer))
+    return new TextDecoder().decode(decompressed)
+  }
+  return file.text()
+}
+
 async function onFile(e: Event) {
   if (!canLoad.value) return
   const input = e.target as HTMLInputElement
@@ -318,7 +328,7 @@ async function onFile(e: Event) {
   if (!file) return
   input.value = '' // 允许重复选择同一文件
   fileName.value = file.name
-  const text = await file.text()
+  const text = await readFileAsText(file)
   await runAnalyze(text)
 }
 
@@ -329,7 +339,7 @@ async function onDrop(e: DragEvent) {
   const file = e.dataTransfer?.files?.[0]
   if (!file) return
   fileName.value = file.name
-  const text = await file.text()
+  const text = await readFileAsText(file)
   await runAnalyze(text)
 }
 
@@ -789,7 +799,7 @@ const mapOption = computed(() => {
           @dragleave.prevent="dragOver = false"
           @drop="onDrop"
         >
-          <input ref="fileInput" type="file" accept=".log,.txt" @change="onFile" hidden />
+          <input ref="fileInput" type="file" accept=".log,.txt,.gz" @change="onFile" hidden />
           <template v-if="!fileName">
             <div class="drop-icon">
               <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
@@ -797,7 +807,7 @@ const mapOption = computed(() => {
                 <path d="M4 16v3a1.5 1.5 0 0 0 1.5 1.5h13A1.5 1.5 0 0 0 20 19v-3" />
               </svg>
             </div>
-            <p>{{ dbLoading ? 'IP 数据库加载中…' : '拖入 access.log 到此处' }}</p>
+            <p>{{ dbLoading ? 'IP 数据库加载中…' : '拖入 access.log 或 access.log.gz 到此处' }}</p>
           </template>
           <p v-else class="file">{{ fileName }}</p>
           <button class="btn ghost" @click="fileInput?.click()">
@@ -961,7 +971,7 @@ const mapOption = computed(() => {
           <path d="M3.5 9h17M3.5 15h17M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" />
         </svg>
         <p>加载日志后在此显示 IP 飞线地图</p>
-        <p class="sub">支持拖拽 nginx access.log（combined 格式）· 数据仅在本机处理</p>
+        <p class="sub">支持拖拽 nginx access.log（combined 格式）或 .gz 压缩文件 · 数据仅在本机处理</p>
       </div>
       <footer v-if="result" class="tips">滚轮缩放 · 拖拽平移 · 悬停查看数值</footer>
       <div v-if="result" class="map-tools">
