@@ -17,7 +17,7 @@ import {
 } from './theme'
 import { gunzipSync } from 'fflate'
 
-const DB_URL = '/data/ip2region.xdb'
+const DB_URL = new URL('../data/ip2region.xdb', import.meta.url).href
 
 const dbLoading = ref(true)
 const dbError = ref('') // 数据库加载失败
