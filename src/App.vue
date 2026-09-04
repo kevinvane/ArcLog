@@ -92,6 +92,7 @@ function onWorkerMessage(e: MessageEvent) {
 }
 
 onMounted(() => {
+  window.addEventListener('resize', onResize)
   try {
     worker = new Worker(new URL('./worker/analyzer.worker.ts', import.meta.url), {
       type: 'module'
@@ -112,6 +113,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  window.removeEventListener('resize', onResize)
   stopPlay()
   worker?.terminate()
   worker = null
@@ -162,6 +164,7 @@ function runAnalyze(text: string) {
   if (!worker || dbLoading.value || dbError.value) return
   lastRawText.value = text
   analyzing.value = true
+  secMore.value = {} // 新日志回到默认截断, 避免上一份日志的展开态残留
   worker.postMessage({
     type: 'analyze',
     text,
@@ -216,6 +219,60 @@ function clearFilters() {
 const hasFilter = computed(
   () => !!(statusFilter.value || provinceFilter.value || ispFilter.value)
 )
+
+// ---------- 右栏(统计面板): 折叠状态与断点 ----------
+const STAT_PREF_KEY = 'arclog-statbar'
+const STAT_W = 360 // 展开宽度
+const STAT_RAIL_W = 36 // 收起后的竖标签条宽度
+const viewportW = ref(window.innerWidth)
+// null = 用户未手动切换, 按断点给默认值; 'open'/'close' = 用户显式选择
+const statPref = ref<string | null>(localStorage.getItem(STAT_PREF_KEY))
+// 窄屏改为浮层抽屉, 不再挤压地图
+const isDrawer = computed(() => viewportW.value < 1280)
+const statExpanded = computed(() => {
+  if (statPref.value) return statPref.value === 'open'
+  return !isDrawer.value && viewportW.value >= 1800
+})
+function toggleStat() {
+  const next = !statExpanded.value
+  statPref.value = next ? 'open' : 'close'
+  localStorage.setItem(STAT_PREF_KEY, statPref.value)
+}
+function onResize() {
+  viewportW.value = window.innerWidth
+}
+
+// 地图区过窄时让图例/时间轴/提示避让, 避免相互重叠
+const mapNarrow = computed(() => {
+  const right = !result.value || isDrawer.value ? 0 : statExpanded.value ? STAT_W : STAT_RAIL_W
+  return viewportW.value - 340 - right < 900
+})
+
+// ---------- 统计分区折叠 ----------
+// 右栏为双列窄栏, 单区超 SEC_LIMIT 条先折叠剩余, 避免纵向过长
+type SecKey = 'suspect' | 'province' | 'status' | 'isp' | 'ua' | 'path'
+const SEC_LIMIT = 6
+const secOpen = ref<Record<SecKey, boolean>>({
+  suspect: false,
+  province: true,
+  status: true,
+  isp: true,
+  ua: true,
+  path: false
+})
+const secMore = ref<Partial<Record<SecKey, boolean>>>({})
+function toggleSec(k: SecKey) {
+  secOpen.value[k] = !secOpen.value[k]
+}
+function shownCount(k: SecKey, total: number) {
+  return secMore.value[k] || total <= SEC_LIMIT ? total : SEC_LIMIT
+}
+function restCount(k: SecKey, total: number) {
+  return total - shownCount(k, total)
+}
+function showRest(k: SecKey) {
+  secMore.value[k] = true
+}
 
 // ---------- 自定义日志格式 ----------
 const FMT_KEY = 'arclog-logformat'
@@ -529,7 +586,18 @@ function onMapOver(params: any) {
   if (!name || !name.trim()) return
   hoveredProvince.value = name
   nextTick(() => {
-    document.getElementById('prov-' + name)?.scrollIntoView({ block: 'nearest' })
+    const el = document.getElementById('prov-' + name)
+    if (el) {
+      el.scrollIntoView({ block: 'nearest' })
+      return
+    }
+    // 行不在 DOM: 右栏收起或省份分区被折叠。抽屉模式弹出会遮挡地图,
+    // 用户显式收起过也不再干预, 这两种情况保持原状
+    if (isDrawer.value || statPref.value === 'close') return
+    if (!result.value?.provinces.slice(0, 12).some((p) => p.name === name)) return
+    if (statPref.value === null) statPref.value = 'open'
+    secOpen.value.province = true
+    nextTick(() => document.getElementById('prov-' + name)?.scrollIntoView({ block: 'nearest' }))
   })
 }
 
@@ -849,112 +917,9 @@ const mapOption = computed(() => {
         <div v-else-if="runError" class="hint err">分析出错: {{ runError }}</div>
       </section>
 
-      <section v-if="result" class="panel stats">
-        <div v-if="hasFilter" class="filter-bar">
-          <span v-if="statusFilter" class="f-chip" @click="statusFilter = null">
-            状态码 {{ statusFilter }} ×
-          </span>
-          <span v-if="provinceFilter" class="f-chip" @click="provinceFilter = null">
-            省份 {{ provinceFilter }} ×
-          </span>
-          <span v-if="ispFilter" class="f-chip" @click="ispFilter = null">
-            运营商 {{ ispFilter }} ×
-          </span>
-          <button class="f-clear" @click="clearFilters">清除</button>
-        </div>
-
-        <div class="stat-grid">
-          <div class="stat"><b>{{ result.cities.length }}</b><span>覆盖城市</span></div>
-          <div class="stat"><b>{{ (hasFilter ? result.matchedLines : result.totalLines).toLocaleString() }}</b><span>{{ hasFilter ? '匹配行数' : '解析行数' }}</span></div>
-          <div class="stat"><b class="warn">{{ result.foreign }}</b><span>海外/未知</span></div>
-          <div class="stat"><b :class="{ warn: result.unknown > 0 }">{{ result.unknown }}</b><span>无法解析</span></div>
-        </div>
-
-        <template v-if="result.suspects.length">
-          <h3 class="danger-title">⚠ 可疑来源 Top 10</h3>
-          <ul class="list suspects">
-            <li v-for="s in result.suspects" :key="s.ip" :title="`主要请求: ${s.topPath}`">
-              <span class="ip">{{ s.ip }}</span>
-              <span class="meta">
-                {{ s.count }} 次 · 错误 {{ (s.errRatio * 100).toFixed(0) }}%
-              </span>
-            </li>
-          </ul>
-        </template>
-
-        <h3>省份 Top 12</h3>
-        <ul class="list">
-          <li
-            v-for="(p, i) in result.provinces.slice(0, 12)"
-            :key="p.name"
-            :id="'prov-' + p.name"
-            :class="{ active: hoveredProvince === p.name, sel: provinceFilter === p.name }"
-            @mouseenter="highlightOnMap(p.name)"
-            @mouseleave="highlightOnMap(null)"
-            @click="toggleProvince(p.name)"
-          >
-            <span class="rank" :class="'r' + (i < 3 ? i + 1 : 0)">{{ i + 1 }}</span>
-            <span class="name">
-              {{ p.name }}<span v-if="alertProvinceSet.has(p.name)" class="warn-badge">⚠</span>
-            </span>
-            <i class="bar"><i :style="{ width: (p.count / maxCount) * 100 + '%' }"></i></i>
-            <span class="num">{{ p.count.toLocaleString() }}</span>
-          </li>
-        </ul>
-
-        <h3>状态码</h3>
-        <ul class="list codes">
-          <li v-for="s in result.status" :key="s.code" @click="toggleStatus(s.code)">
-            <span
-              class="chip"
-              :class="[statusClass(s.code), { dim: statusFilter && statusFilter !== s.code }]"
-            >{{ s.code }}</span>
-            <span class="num">{{ s.count.toLocaleString() }}</span>
-          </li>
-        </ul>
-
-        <template v-if="result.isps.length">
-          <h3>运营商</h3>
-          <ul class="list isps">
-            <li
-              v-for="isp in result.isps.slice(0, 8)"
-              :key="isp.name"
-              :title="isp.name"
-              :class="{ sel: ispFilter === isp.name }"
-              @click="toggleIsp(isp.name)"
-            >
-              <span class="name">{{ isp.name }}</span>
-              <i class="bar"><i :style="{ width: (isp.count / maxIspCount) * 100 + '%' }"></i></i>
-              <span class="num">{{ isp.count.toLocaleString() }}</span>
-            </li>
-          </ul>
-        </template>
-
-        <template v-if="result.uas.length">
-          <h3>客户端</h3>
-          <ul class="list uas">
-            <li v-for="u in result.uas.slice(0, 8)" :key="u.name" :title="u.name">
-              <span class="name">{{ u.name }}</span>
-              <i class="bar"><i :style="{ width: (u.count / maxUaCount) * 100 + '%' }"></i></i>
-              <span class="num">{{ u.count.toLocaleString() }}</span>
-            </li>
-          </ul>
-        </template>
-
-        <template v-if="result.topPaths.length">
-          <h3>路径 Top 10</h3>
-          <ul class="list paths">
-            <li v-for="(p, i) in result.topPaths" :key="p.path" :title="p.path">
-              <span class="rank" :class="'r' + (i < 3 ? i + 1 : 0)">{{ i + 1 }}</span>
-              <span class="path">{{ p.path }}</span>
-              <span class="num">{{ p.count.toLocaleString() }}</span>
-            </li>
-          </ul>
-        </template>
-      </section>
     </aside>
 
-    <main class="map">
+    <main class="map" :class="{ narrow: mapNarrow }">
       <div v-if="result" class="chart">
         <VChart
           ref="chartComp"
@@ -1005,11 +970,232 @@ const mapOption = computed(() => {
         分析中{{ parseProgress != null ? ` ${parseProgress}%` : '…' }}
       </div>
     </main>
+
+    <!-- 右栏: 统计面板。收起为竖标签条, 窄屏(<1280)改为浮层抽屉 -->
+    <aside
+      v-if="result"
+      class="statbar"
+      :class="{ collapsed: !statExpanded, drawer: isDrawer }"
+    >
+      <button v-if="!statExpanded" class="rail" title="展开统计面板" @click="toggleStat">
+        <span class="rail-ico">‹</span>
+        <span class="rail-text">统计</span>
+      </button>
+
+      <template v-else>
+        <header class="stat-head">
+          <span>统计概览</span>
+          <button class="fold" title="收起统计面板" @click="toggleStat">›</button>
+        </header>
+
+        <div class="stat-body">
+          <div v-if="hasFilter" class="filter-bar">
+            <span v-if="statusFilter" class="f-chip" @click="statusFilter = null">
+              状态码 {{ statusFilter }} ×
+            </span>
+            <span v-if="provinceFilter" class="f-chip" @click="provinceFilter = null">
+              省份 {{ provinceFilter }} ×
+            </span>
+            <span v-if="ispFilter" class="f-chip" @click="ispFilter = null">
+              运营商 {{ ispFilter }} ×
+            </span>
+            <button class="f-clear" @click="clearFilters">清除</button>
+          </div>
+
+          <div class="stat-grid">
+            <div class="stat"><b>{{ result.cities.length }}</b><span>覆盖城市</span></div>
+            <div class="stat"><b>{{ (hasFilter ? result.matchedLines : result.totalLines).toLocaleString() }}</b><span>{{ hasFilter ? '匹配行数' : '解析行数' }}</span></div>
+            <div class="stat"><b class="warn">{{ result.foreign }}</b><span>海外/未知</span></div>
+            <div class="stat"><b :class="{ warn: result.unknown > 0 }">{{ result.unknown }}</b><span>无法解析</span></div>
+          </div>
+
+          <div class="cards">
+            <!-- 可疑来源: 整行 -->
+            <section
+              v-if="result.suspects.length"
+              class="card sec span2 danger"
+              :class="{ open: secOpen.suspect }"
+            >
+              <button class="sec-head" @click="toggleSec('suspect')">
+                <span class="caret">▸</span>
+                <span class="sec-title">⚠ 可疑来源 Top 10</span>
+                <span class="sec-badge">{{ result.suspects.length }}</span>
+              </button>
+              <ul v-show="secOpen.suspect" class="list suspects">
+                <li
+                  v-for="s in result.suspects.slice(0, shownCount('suspect', result.suspects.length))"
+                  :key="s.ip"
+                  :title="`主要请求: ${s.topPath}`"
+                >
+                  <span class="ip">{{ s.ip }}</span>
+                  <span class="meta">{{ s.count }} 次 · 错误 {{ (s.errRatio * 100).toFixed(0) }}%</span>
+                </li>
+              </ul>
+              <button
+                v-if="secOpen.suspect && restCount('suspect', result.suspects.length) > 0"
+                class="more"
+                @click="showRest('suspect')"
+              >
+                展开剩余 {{ restCount('suspect', result.suspects.length) }} 项
+              </button>
+            </section>
+
+            <!-- 省份: 左列 -->
+            <section v-if="result.provinces.length" class="card sec" :class="{ open: secOpen.province }">
+              <button class="sec-head" @click="toggleSec('province')">
+                <span class="caret">▸</span>
+                <span class="sec-title">省份 Top 12</span>
+                <span class="sec-badge">{{ result.provinces.length }}</span>
+              </button>
+              <ul v-show="secOpen.province" class="list">
+                <li
+                  v-for="(p, i) in result.provinces.slice(0, 12)"
+                  :key="p.name"
+                  :id="'prov-' + p.name"
+                  :class="{ active: hoveredProvince === p.name, sel: provinceFilter === p.name }"
+                  :style="{ '--pct': (p.count / maxCount) * 100 + '%' }"
+                  @mouseenter="highlightOnMap(p.name)"
+                  @mouseleave="highlightOnMap(null)"
+                  @click="toggleProvince(p.name)"
+                >
+                  <span class="rank" :class="'r' + (i < 3 ? i + 1 : 0)">{{ i + 1 }}</span>
+                  <span class="name">
+                    {{ p.name }}<span v-if="alertProvinceSet.has(p.name)" class="warn-badge">⚠</span>
+                  </span>
+                  <span class="num">{{ p.count.toLocaleString() }}</span>
+                </li>
+              </ul>
+            </section>
+
+            <!-- 状态码: 右列 -->
+            <section v-if="result.status.length" class="card sec" :class="{ open: secOpen.status }">
+              <button class="sec-head" @click="toggleSec('status')">
+                <span class="caret">▸</span>
+                <span class="sec-title">状态码</span>
+                <span class="sec-badge">{{ result.status.length }}</span>
+              </button>
+              <ul v-show="secOpen.status" class="list codes">
+                <li
+                  v-for="s in result.status.slice(0, shownCount('status', result.status.length))"
+                  :key="s.code"
+                  :style="{ '--pct': (s.count / result.status[0].count) * 100 + '%' }"
+                  @click="toggleStatus(s.code)"
+                >
+                  <span
+                    class="chip"
+                    :class="[statusClass(s.code), { dim: statusFilter && statusFilter !== s.code }]"
+                  >{{ s.code }}</span>
+                  <span class="num">{{ s.count.toLocaleString() }}</span>
+                </li>
+              </ul>
+              <button
+                v-if="secOpen.status && restCount('status', result.status.length) > 0"
+                class="more"
+                @click="showRest('status')"
+              >
+                展开剩余 {{ restCount('status', result.status.length) }} 项
+              </button>
+            </section>
+
+            <!-- 运营商: 左列 -->
+            <section v-if="result.isps.length" class="card sec" :class="{ open: secOpen.isp }">
+              <button class="sec-head" @click="toggleSec('isp')">
+                <span class="caret">▸</span>
+                <span class="sec-title">运营商</span>
+                <span class="sec-badge">{{ result.isps.length }}</span>
+              </button>
+              <ul v-show="secOpen.isp" class="list isps">
+                <li
+                  v-for="isp in result.isps.slice(0, shownCount('isp', result.isps.length))"
+                  :key="isp.name"
+                  :title="isp.name"
+                  :class="{ sel: ispFilter === isp.name }"
+                  :style="{ '--pct': (isp.count / maxIspCount) * 100 + '%' }"
+                  @click="toggleIsp(isp.name)"
+                >
+                  <span class="name">{{ isp.name }}</span>
+                  <span class="num">{{ isp.count.toLocaleString() }}</span>
+                </li>
+              </ul>
+              <button
+                v-if="secOpen.isp && restCount('isp', result.isps.length) > 0"
+                class="more"
+                @click="showRest('isp')"
+              >
+                展开剩余 {{ restCount('isp', result.isps.length) }} 项
+              </button>
+            </section>
+
+            <!-- 客户端: 右列 -->
+            <section v-if="result.uas.length" class="card sec" :class="{ open: secOpen.ua }">
+              <button class="sec-head" @click="toggleSec('ua')">
+                <span class="caret">▸</span>
+                <span class="sec-title">客户端</span>
+                <span class="sec-badge">{{ result.uas.length }}</span>
+              </button>
+              <ul v-show="secOpen.ua" class="list uas">
+                <li
+                  v-for="u in result.uas.slice(0, shownCount('ua', result.uas.length))"
+                  :key="u.name"
+                  :title="u.name"
+                  :style="{ '--pct': (u.count / maxUaCount) * 100 + '%' }"
+                >
+                  <span class="name">{{ u.name }}</span>
+                  <span class="num">{{ u.count.toLocaleString() }}</span>
+                </li>
+              </ul>
+              <button
+                v-if="secOpen.ua && restCount('ua', result.uas.length) > 0"
+                class="more"
+                @click="showRest('ua')"
+              >
+                展开剩余 {{ restCount('ua', result.uas.length) }} 项
+              </button>
+            </section>
+
+            <!-- 路径: 整行 -->
+            <section
+              v-if="result.topPaths.length"
+              class="card sec span2"
+              :class="{ open: secOpen.path }"
+            >
+              <button class="sec-head" @click="toggleSec('path')">
+                <span class="caret">▸</span>
+                <span class="sec-title">路径 Top 10</span>
+                <span class="sec-badge">{{ result.topPaths.length }}</span>
+              </button>
+              <ul v-show="secOpen.path" class="list paths">
+                <li
+                  v-for="(p, i) in result.topPaths.slice(0, shownCount('path', result.topPaths.length))"
+                  :key="p.path"
+                  :title="p.path"
+                  :style="{ '--pct': (p.count / result.topPaths[0].count) * 100 + '%' }"
+                >
+                  <span class="rank" :class="'r' + (i < 3 ? i + 1 : 0)">{{ i + 1 }}</span>
+                  <span class="path">{{ p.path }}</span>
+                  <span class="num">{{ p.count.toLocaleString() }}</span>
+                </li>
+              </ul>
+              <button
+                v-if="secOpen.path && restCount('path', result.topPaths.length) > 0"
+                class="more"
+                @click="showRest('path')"
+              >
+                展开剩余 {{ restCount('path', result.topPaths.length) }} 项
+              </button>
+            </section>
+          </div>
+        </div>
+      </template>
+    </aside>
+
+    <div v-if="isDrawer && statExpanded" class="stat-mask" @click="toggleStat"></div>
   </div>
 </template>
 
 <style scoped>
 .layout {
+  position: relative;
   display: flex;
   height: 100vh;
   background:
@@ -1322,15 +1508,6 @@ input {
   color: var(--dim);
 }
 
-h3 {
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.8px;
-  text-transform: uppercase;
-  margin: 4px 0 10px;
-  color: var(--dim);
-}
-
 .list {
   list-style: none;
   margin: 0 0 6px;
@@ -1450,9 +1627,6 @@ h3 {
   color: #fbbf24;
   font-size: 11px;
 }
-.danger-title {
-  color: #fb7185;
-}
 .suspects li {
   grid-template-columns: 1fr auto;
   display: flex;
@@ -1468,20 +1642,6 @@ h3 {
   flex-shrink: 0;
   color: var(--dim);
   font-size: 11px;
-}
-.bar {
-  position: relative;
-  height: 4px;
-  border-radius: 2px;
-  background: var(--bar-track);
-  overflow: hidden;
-}
-.bar i {
-  position: absolute;
-  inset: 0 auto 0 0;
-  border-radius: 2px;
-  background: linear-gradient(90deg, var(--dim), var(--accent));
-  transition: width 0.4s ease;
 }
 .num {
   text-align: right;
@@ -1648,15 +1808,265 @@ h3 {
   to { transform: rotate(360deg); }
 }
 
+/* ---------- 右栏: 统计面板 ---------- */
+.statbar {
+  position: relative;
+  z-index: 2;
+  flex: 0 0 360px;
+  width: 360px;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--border);
+  background: var(--float-bg);
+  backdrop-filter: blur(6px);
+  transition: flex-basis 0.22s ease, width 0.22s ease;
+}
+.statbar.collapsed {
+  flex-basis: 36px;
+  width: 36px;
+}
+/* 窄屏: 浮层抽屉, 不再挤压地图 */
+.statbar.drawer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 30;
+  box-shadow: -14px 0 36px rgba(0, 0, 0, 0.4);
+}
+.stat-mask {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  background: var(--overlay);
+  backdrop-filter: blur(2px);
+}
+
+/* 收起态: 竖排标签条 */
+.rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: 100%;
+  color: var(--dim);
+  transition: color 0.15s, background 0.15s;
+}
+.rail:hover {
+  color: var(--accent);
+  background: var(--hover);
+}
+.rail-ico {
+  font-size: 15px;
+  line-height: 1;
+}
+.rail-text {
+  writing-mode: vertical-rl;
+  letter-spacing: 3px;
+  font-size: 12px;
+}
+
+.stat-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 14px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+.fold {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  display: grid;
+  place-items: center;
+  color: var(--dim);
+  font-size: 15px;
+  transition: color 0.15s, background 0.15s;
+}
+.fold:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+
+.stat-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 14px 16px;
+}
+
+/* 双列网格: 每个统计维度一张卡片, 整行的用 .span2 */
+.cards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  align-items: start;
+}
+.card {
+  min-width: 0;
+  padding: 7px 8px 8px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.card.span2 {
+  grid-column: 1 / -1;
+}
+
+/* 分区标题(可折叠) */
+.sec-head {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  padding: 2px 2px 7px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--dim);
+  transition: color 0.15s;
+}
+.sec-head:hover {
+  color: var(--text);
+}
+.caret {
+  flex: 0 0 auto;
+  font-size: 8px;
+  color: var(--muted);
+  transition: transform 0.18s;
+}
+.sec.open .caret {
+  transform: rotate(90deg);
+}
+.sec-title {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sec-badge {
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0;
+  color: var(--dim);
+  background: var(--panel-2);
+  border-radius: 6px;
+  padding: 0 5px;
+}
+.card.danger .sec-title {
+  color: #fb7185;
+}
+.more {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  padding: 3px;
+  font-size: 10px;
+  color: var(--muted);
+  border-radius: 6px;
+}
+.more:hover {
+  color: var(--accent);
+  background: var(--hover);
+}
+
+/* 右栏窄列: 去掉独立进度条, 改用行内背景条表达占比(--pct) */
+.stat-body .stat-grid {
+  margin-bottom: 10px;
+}
+.stat-body .filter-bar {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin: 0 0 10px;
+  padding: 7px 8px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  backdrop-filter: blur(8px);
+}
+.statbar .list li {
+  grid-template-columns: 18px 1fr 46px;
+  gap: 6px;
+  padding: 4px;
+  border-bottom: none;
+  border-radius: 5px;
+  background-image: linear-gradient(
+    90deg,
+    var(--accent-soft) var(--pct, 0%),
+    transparent var(--pct, 0%)
+  );
+}
+.statbar .list li:hover,
+.statbar .list li.active {
+  background-color: var(--hover);
+}
+.statbar .codes li,
+.statbar .isps li,
+.statbar .uas li {
+  grid-template-columns: 1fr 46px;
+}
+.statbar .isps li {
+  cursor: pointer;
+}
+.statbar .list .name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.statbar .rank {
+  width: 16px;
+  height: 16px;
+  font-size: 10px;
+}
+.statbar .num {
+  font-size: 11px;
+}
+.statbar .chip {
+  font-size: 10px;
+  padding: 1px 6px;
+}
+.statbar .paths .path {
+  font-size: 10px;
+}
+
+/* 地图区过窄: 图例上移到导出按钮下方, 时间轴/提示相应收缩, 避免重叠 */
+.map.narrow .legend {
+  top: 52px;
+  bottom: auto;
+}
+.map.narrow .t-slider {
+  width: 130px;
+}
+.map.narrow .t-label {
+  min-width: 74px;
+}
+.map.narrow .tips {
+  display: none;
+}
+
 /* ---------- 滚动条 ---------- */
-.sidebar::-webkit-scrollbar {
+.sidebar::-webkit-scrollbar,
+.stat-body::-webkit-scrollbar {
   width: 8px;
 }
-.sidebar::-webkit-scrollbar-thumb {
+.sidebar::-webkit-scrollbar-thumb,
+.stat-body::-webkit-scrollbar-thumb {
   background: var(--border-2);
   border-radius: 4px;
 }
-.sidebar::-webkit-scrollbar-thumb:hover {
+.sidebar::-webkit-scrollbar-thumb:hover,
+.stat-body::-webkit-scrollbar-thumb:hover {
   background: var(--dim);
 }
 </style>
