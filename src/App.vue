@@ -815,7 +815,7 @@ const mapOption = computed(() => {
               :key="a.id"
               class="swatch"
               :class="{ on: accentId === a.id }"
-              :style="{ background: `linear-gradient(135deg, ${a.accent}, ${a.accent2})` }"
+              :style="{ '--c1': a.accent, '--c2': a.accent2 }"
               :title="a.label"
               @click="setAccent(a.id)"
             ></button>
@@ -1286,11 +1286,23 @@ const mapOption = computed(() => {
   gap: 8px;
 }
 .swatch {
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
   width: 28px;
   height: 28px;
+  padding: 0;
+  border: 0;
   border-radius: 50%;
-  border: 2px solid transparent;
+  background: none;
   transition: transform 0.12s, box-shadow 0.12s;
+}
+.swatch::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--c1), var(--c2));
 }
 .swatch:hover:not(.on) {
   transform: scale(1.1);
